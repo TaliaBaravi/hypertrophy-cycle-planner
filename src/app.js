@@ -10,12 +10,46 @@ import { clearState, loadState, saveState } from "./storage.js";
 import { createId, formatPriority } from "./utils.js";
 
 const app = document.querySelector("#app");
+const BUILDER_STEPS = [
+  {
+    id: "setup",
+    label: "Cycle setup",
+    title: "Choose your cycle frame",
+    description: "Start with the number of training days and the mesocycle length."
+  },
+  {
+    id: "priorities",
+    label: "Priorities",
+    title: "Set muscle priorities",
+    description: "Choose which muscles should push hardest this cycle and which ones just maintain."
+  },
+  {
+    id: "split",
+    label: "Split",
+    title: "Build your weekly split",
+    description: "Decide which muscles you train on each day."
+  },
+  {
+    id: "exercises",
+    label: "Exercises",
+    title: "Pick exercises",
+    description: "Choose at least one exercise for each day-muscle block."
+  },
+  {
+    id: "baseline",
+    label: "Week 1",
+    title: "Set week 1 baselines",
+    description: "Enter starting load, sets, and rep ranges before creating the mesocycle."
+  }
+];
 
 let state = loadState() || {
   customExercises: [],
   appData: null,
   draft: createInitialDraft()
 };
+
+state.draft.builderStep ??= 0;
 
 render();
 
@@ -30,7 +64,8 @@ function createInitialDraft() {
       assignedMuscles: []
     })),
     exerciseSelections: {},
-    baselineInputs: {}
+    baselineInputs: {},
+    builderStep: 0
   };
 }
 
@@ -45,6 +80,7 @@ function render() {
 
 function renderBuilder() {
   const draft = state.draft;
+  const currentStep = BUILDER_STEPS[draft.builderStep] || BUILDER_STEPS[0];
   const warnings = validateSplit(
     draft.dayAssignments.map((day, index) => ({
       id: `draft-day-${index}`,
@@ -54,124 +90,62 @@ function renderBuilder() {
     draft.priorities
   );
   const exercises = [...EXERCISE_LIBRARY, ...state.customExercises];
+  const selectedExerciseIds = Object.values(draft.exerciseSelections).flat();
+  const assignedBlocks = draft.dayAssignments.reduce((count, day) => count + day.assignedMuscles.length, 0);
+  const isLastStep = draft.builderStep === BUILDER_STEPS.length - 1;
 
   app.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
           <p class="eyebrow">Cycle builder</p>
-          <h2>Create your next mesocycle</h2>
+          <h2>${currentStep.title}</h2>
         </div>
-        <p class="panel-copy">Choose cycle length, priorities, split structure, exercises, and week 1 baselines in one flow.</p>
+        <p class="panel-copy">${currentStep.description}</p>
       </div>
-
-      <div class="grid-two">
-        <label class="field">
-          <span>Build phase length</span>
-          <select name="buildWeeks">
-            <option value="6" ${draft.buildWeeks === 6 ? "selected" : ""}>6 weeks + deload</option>
-            <option value="8" ${draft.buildWeeks === 8 ? "selected" : ""}>8 weeks + deload</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>Training days per week</span>
-          <select name="trainingDays">
-            ${[3, 4, 5, 6].map((days) => `<option value="${days}" ${draft.trainingDays === days ? "selected" : ""}>${days} days</option>`).join("")}
-          </select>
-        </label>
-      </div>
-
-      <section class="subsection">
-        <div class="section-title-row">
-          <h3>Muscle priorities</h3>
-          <p>High gets more weekly sets and a steeper climb. Maintain stays stable.</p>
-        </div>
-        <div class="priority-grid">
-          ${MUSCLE_GROUPS.map((muscle) => `
-            <label class="field compact">
-              <span>${muscle.name}</span>
-              <select data-priority="${muscle.id}">
-                ${PRIORITY_LEVELS.map((level) => `<option value="${level}" ${draft.priorities[muscle.id] === level ? "selected" : ""}>${formatPriority(level)}</option>`).join("")}
-              </select>
-            </label>
-          `).join("")}
-        </div>
-      </section>
-
-      <section class="subsection">
-        <div class="section-title-row">
-          <h3>Weekly split</h3>
-          <p>Assign muscles to each day. High-priority muscles should usually appear at least twice.</p>
-        </div>
-        <div class="day-grid">
-          ${draft.dayAssignments.map((day, index) => `
-            <article class="day-card">
-              <label class="field">
-                <span>Day label</span>
-                <input type="text" data-day-name="${index}" value="${escapeHtml(day.name)}" />
-              </label>
-              <div class="checkbox-list">
-                ${MUSCLE_GROUPS.map((muscle) => `
-                  <label class="checkbox-pill">
-                    <input type="checkbox" data-day-muscle="${index}" value="${muscle.id}" ${day.assignedMuscles.includes(muscle.id) ? "checked" : ""} />
-                    <span>${muscle.name}</span>
-                  </label>
-                `).join("")}
-              </div>
-            </article>
-          `).join("")}
-        </div>
-        ${warnings.length ? `<div class="warning-box">${warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : `<p class="success-line">Split coverage looks workable for the selected priorities.</p>`}
-      </section>
-
-      <section class="subsection">
-        <div class="section-title-row">
-          <h3>Exercise selection</h3>
-          <p>Pick at least one exercise for each muscle you assigned to a day.</p>
-        </div>
-        <div class="exercise-groups">
-          ${draft.dayAssignments.map((day, dayIndex) => `
-            <article class="exercise-card">
-              <h4>${escapeHtml(day.name)}</h4>
-              ${day.assignedMuscles.length ? day.assignedMuscles.map((muscleId) => renderExerciseSelector(dayIndex, muscleId, draft, exercises)).join("") : `<p class="muted">Add muscles to this day to unlock exercise choices.</p>`}
-            </article>
-          `).join("")}
-        </div>
-        <form class="custom-exercise-form" id="custom-exercise-form">
-          <h4>Add a custom exercise</h4>
-          <div class="grid-three">
-            <label class="field">
-              <span>Name</span>
-              <input required name="name" type="text" placeholder="Smith incline press" />
-            </label>
-            <label class="field">
-              <span>Primary muscle</span>
-              <select required name="primaryMuscle">
-                ${MUSCLE_GROUPS.map((muscle) => `<option value="${muscle.id}">${muscle.name}</option>`).join("")}
-              </select>
-            </label>
-            <label class="field">
-              <span>Equipment</span>
-              <input required name="equipment" type="text" placeholder="Smith machine" />
-            </label>
+      <div class="builder-stepper">
+        ${BUILDER_STEPS.map((step, index) => `
+          <div class="step-chip ${index === draft.builderStep ? "step-chip--active" : ""} ${index < draft.builderStep ? "step-chip--done" : ""}">
+            <span>${index + 1}</span>
+            <strong>${step.label}</strong>
           </div>
-          <button type="submit" class="secondary-button">Add custom exercise</button>
-        </form>
+        `).join("")}
+      </div>
+
+      <section class="builder-stage">
+        ${renderBuilderStepContent(draft, exercises, warnings)}
       </section>
 
       <section class="subsection">
         <div class="section-title-row">
-          <h3>Week 1 baseline</h3>
-          <p>Set your starting weight, target sets, and rep range for each selected exercise.</p>
+          <h3>Builder snapshot</h3>
+          <p>Quick view of what you've already locked in.</p>
         </div>
-        <div class="baseline-list">
-          ${renderBaselineInputs(draft, exercises)}
+        <div class="overview-strip">
+          <div class="overview-item">
+            <span>Days</span>
+            <strong>${draft.trainingDays}</strong>
+          </div>
+          <div class="overview-item">
+            <span>Cycle</span>
+            <strong>${draft.buildWeeks} + deload</strong>
+          </div>
+          <div class="overview-item">
+            <span>Muscle blocks</span>
+            <strong>${assignedBlocks}</strong>
+          </div>
+          <div class="overview-item">
+            <span>Exercises</span>
+            <strong>${selectedExerciseIds.length}</strong>
+          </div>
         </div>
       </section>
 
       <div class="action-row">
-        <button id="create-cycle" class="primary-button">Create mesocycle</button>
+        <div class="builder-nav">
+          <button id="builder-back" class="ghost-button" ${draft.builderStep === 0 ? "disabled" : ""}>Back</button>
+          ${isLastStep ? `<button id="create-cycle" class="primary-button">Create mesocycle</button>` : `<button id="builder-next" class="primary-button">Continue</button>`}
+        </div>
         <button id="reset-builder" class="ghost-button">Reset builder</button>
       </div>
     </section>
@@ -202,6 +176,119 @@ function renderExerciseSelector(dayIndex, muscleId, draft, exercises) {
       </div>
     </div>
   `;
+}
+
+function renderBuilderStepContent(draft, exercises, warnings) {
+  switch (draft.builderStep) {
+    case 0:
+      return `
+        <div class="grid-two">
+          <label class="field">
+            <span>Build phase length</span>
+            <select name="buildWeeks">
+              <option value="6" ${draft.buildWeeks === 6 ? "selected" : ""}>6 weeks + deload</option>
+              <option value="8" ${draft.buildWeeks === 8 ? "selected" : ""}>8 weeks + deload</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Training days per week</span>
+            <select name="trainingDays">
+              ${[3, 4, 5, 6].map((days) => `<option value="${days}" ${draft.trainingDays === days ? "selected" : ""}>${days} days</option>`).join("")}
+            </select>
+          </label>
+        </div>
+      `;
+    case 1:
+      return `
+        <div class="section-title-row">
+          <h3>Muscle priorities</h3>
+          <p>High gets more weekly sets and a steeper climb. Maintain stays stable.</p>
+        </div>
+        <div class="priority-grid">
+          ${MUSCLE_GROUPS.map((muscle) => `
+            <label class="field compact">
+              <span>${muscle.name}</span>
+              <select data-priority="${muscle.id}">
+                ${PRIORITY_LEVELS.map((level) => `<option value="${level}" ${draft.priorities[muscle.id] === level ? "selected" : ""}>${formatPriority(level)}</option>`).join("")}
+              </select>
+            </label>
+          `).join("")}
+        </div>
+      `;
+    case 2:
+      return `
+        <div class="section-title-row">
+          <h3>Weekly split</h3>
+          <p>Assign muscles to each day. High-priority muscles should usually appear at least twice.</p>
+        </div>
+        <div class="day-grid">
+          ${draft.dayAssignments.map((day, index) => `
+            <article class="day-card">
+              <label class="field">
+                <span>Day label</span>
+                <input type="text" data-day-name="${index}" value="${escapeHtml(day.name)}" />
+              </label>
+              <div class="checkbox-list">
+                ${MUSCLE_GROUPS.map((muscle) => `
+                  <label class="checkbox-pill">
+                    <input type="checkbox" data-day-muscle="${index}" value="${muscle.id}" ${day.assignedMuscles.includes(muscle.id) ? "checked" : ""} />
+                    <span>${muscle.name}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        ${warnings.length ? `<div class="warning-box">${warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : `<p class="success-line">Split coverage looks workable for the selected priorities.</p>`}
+      `;
+    case 3:
+      return `
+        <div class="section-title-row">
+          <h3>Exercise selection</h3>
+          <p>Pick at least one exercise for each muscle you assigned to a day.</p>
+        </div>
+        <div class="exercise-groups">
+          ${draft.dayAssignments.map((day, dayIndex) => `
+            <article class="exercise-card">
+              <h4>${escapeHtml(day.name)}</h4>
+              ${day.assignedMuscles.length ? day.assignedMuscles.map((muscleId) => renderExerciseSelector(dayIndex, muscleId, draft, exercises)).join("") : `<p class="muted">Add muscles to this day in the previous step to unlock exercise choices.</p>`}
+            </article>
+          `).join("")}
+        </div>
+        <form class="custom-exercise-form" id="custom-exercise-form">
+          <h4>Add a custom exercise</h4>
+          <div class="grid-three">
+            <label class="field">
+              <span>Name</span>
+              <input required name="name" type="text" placeholder="Smith incline press" />
+            </label>
+            <label class="field">
+              <span>Primary muscle</span>
+              <select required name="primaryMuscle">
+                ${MUSCLE_GROUPS.map((muscle) => `<option value="${muscle.id}">${muscle.name}</option>`).join("")}
+              </select>
+            </label>
+            <label class="field">
+              <span>Equipment</span>
+              <input required name="equipment" type="text" placeholder="Smith machine" />
+            </label>
+          </div>
+          <button type="submit" class="secondary-button">Add custom exercise</button>
+        </form>
+      `;
+    case 4:
+    default:
+      return `
+        <div class="section-title-row">
+          <h3>Week 1 baseline</h3>
+          <p>Set your starting weight, target sets, and rep range for each selected exercise.</p>
+        </div>
+        <div class="baseline-list">
+          ${renderBaselineInputs(draft, exercises)}
+        </div>
+      `;
+  }
 }
 
 function renderBaselineInputs(draft, exercises) {
@@ -376,12 +463,12 @@ function renderWorkoutLogger(exercise, savedLogs) {
 }
 
 function bindBuilderEvents() {
-  app.querySelector('[name="buildWeeks"]').addEventListener("change", (event) => {
+  app.querySelector('[name="buildWeeks"]')?.addEventListener("change", (event) => {
     state.draft.buildWeeks = Number(event.target.value);
     persistAndRender();
   });
 
-  app.querySelector('[name="trainingDays"]').addEventListener("change", (event) => {
+  app.querySelector('[name="trainingDays"]')?.addEventListener("change", (event) => {
     const nextDays = Number(event.target.value);
     const dayAssignments = Array.from({ length: nextDays }, (_, index) => {
       return state.draft.dayAssignments[index] || { name: `Day ${index + 1}`, assignedMuscles: [] };
@@ -433,7 +520,7 @@ function bindBuilderEvents() {
     });
   });
 
-  app.querySelector("#custom-exercise-form").addEventListener("submit", (event) => {
+  app.querySelector("#custom-exercise-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const formData = new FormData(event.target);
     state.customExercises.push({
@@ -460,6 +547,22 @@ function bindBuilderEvents() {
   });
   app.querySelectorAll("[data-baseline-rep-max]").forEach((input) => {
     input.addEventListener("input", updateBaselineState);
+  });
+
+  app.querySelector("#builder-back")?.addEventListener("click", () => {
+    state.draft.builderStep = Math.max(0, state.draft.builderStep - 1);
+    persistAndRender();
+  });
+
+  app.querySelector("#builder-next")?.addEventListener("click", () => {
+    const error = getBuilderStepValidationError(state.draft.builderStep, state.draft);
+    if (error) {
+      window.alert(error);
+      return;
+    }
+
+    state.draft.builderStep = Math.min(BUILDER_STEPS.length - 1, state.draft.builderStep + 1);
+    persistAndRender();
   });
 
   app.querySelector("#reset-builder").addEventListener("click", () => {
@@ -496,6 +599,24 @@ function bindBuilderEvents() {
     });
     persistAndRender();
   });
+}
+
+function getBuilderStepValidationError(step, draft) {
+  if (step === 2) {
+    const assignedMuscles = draft.dayAssignments.flatMap((day) => day.assignedMuscles);
+    if (!assignedMuscles.length) {
+      return "Choose at least one muscle in your weekly split before continuing.";
+    }
+  }
+
+  if (step === 3) {
+    const missing = getMissingExerciseAssignments(draft);
+    if (missing.length) {
+      return `Choose at least one exercise for: ${missing.join(", ")}`;
+    }
+  }
+
+  return "";
 }
 
 function bindDashboardEvents() {
