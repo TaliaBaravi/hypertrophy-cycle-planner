@@ -258,6 +258,9 @@ function renderBuilderStepContent(draft, exercises, warnings) {
           <h3>Exercise selection</h3>
           <p>Pick at least one exercise for each muscle you assigned to a day.</p>
         </div>
+        <div class="builder-nav">
+          <button type="button" class="secondary-button" id="auto-fill-exercises">Auto fill</button>
+        </div>
         <div class="exercise-groups">
           ${draft.dayAssignments.map((day, dayIndex) => `
             <article class="exercise-card">
@@ -402,6 +405,38 @@ function renderExerciseModal(draft, exercises) {
       </div>
     </div>
   `;
+}
+
+function autoFillExerciseSelections(draft, exercises) {
+  const nextSelections = { ...draft.exerciseSelections };
+
+  draft.dayAssignments.forEach((day, dayIndex) => {
+    day.assignedMuscles.forEach((muscleId) => {
+      const key = `${dayIndex}:${muscleId}`;
+      const currentSelection = nextSelections[key] || [];
+      if (currentSelection.length) {
+        return;
+      }
+
+      const pool = shuffleArray(
+        exercises.filter((exercise) => exercise.primaryMuscle === muscleId)
+      );
+
+      const targetCount = Math.min(pool.length, pool.length >= 2 ? 2 : 1);
+      nextSelections[key] = pool.slice(0, targetCount).map((exercise) => exercise.id);
+    });
+  });
+
+  state.draft.exerciseSelections = nextSelections;
+}
+
+function shuffleArray(items) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
 }
 
 function getPriorityMuscles(level, priorities) {
@@ -686,6 +721,11 @@ function bindBuilderEvents() {
       state.draft.exerciseModal = event.currentTarget.dataset.exerciseOpen;
       persistAndRender();
     });
+  });
+
+  app.querySelector("#auto-fill-exercises")?.addEventListener("click", () => {
+    autoFillExerciseSelections(state.draft, buildExercisePool());
+    persistAndRender();
   });
 
   app.querySelectorAll("[data-day-name]").forEach((input) => {
@@ -989,6 +1029,10 @@ function collectWeekLogs() {
 
 function buildExerciseIndex() {
   return Object.fromEntries([...EXERCISE_LIBRARY, ...state.customExercises].map((exercise) => [exercise.id, exercise]));
+}
+
+function buildExercisePool() {
+  return [...EXERCISE_LIBRARY, ...state.customExercises];
 }
 
 function persistAndRender() {
