@@ -34,12 +34,6 @@ const BUILDER_STEPS = [
     label: "Exercises",
     title: "Pick exercises",
     description: "Choose at least one exercise for each day-muscle block."
-  },
-  {
-    id: "baseline",
-    label: "Week 1",
-    title: "Set week 1 baselines",
-    description: "Enter starting load, sets, and rep ranges before creating the mesocycle."
   }
 ];
 
@@ -71,7 +65,6 @@ function createInitialDraft() {
       assignedMuscles: []
     })),
     exerciseSelections: {},
-    baselineInputs: {},
     prioritySelections: {
       HIGH: [],
       MEDIUM: [],
@@ -276,17 +269,8 @@ function renderBuilderStepContent(draft, exercises, warnings) {
           <button type="submit" class="secondary-button">Add custom exercise</button>
         </form>
       `;
-    case 4:
     default:
-      return `
-        <div class="section-title-row">
-          <h3>Week 1 baseline</h3>
-          <p>Set your starting weight, target sets, and rep range for each selected exercise.</p>
-        </div>
-        <div class="baseline-list">
-          ${renderBaselineInputs(draft, exercises)}
-        </div>
-      `;
+      return ``;
   }
 }
 
@@ -531,40 +515,6 @@ function getPriorityDescription(level) {
   return "Lower stable volume for muscles you only want to maintain.";
 }
 
-function renderBaselineInputs(draft, exercises) {
-  const selectedExerciseIds = Object.values(draft.exerciseSelections).flat();
-  if (!selectedExerciseIds.length) {
-    return `<p class="muted">Choose exercises above to unlock baseline setup.</p>`;
-  }
-
-  return selectedExerciseIds.map((exerciseId) => {
-    const exercise = exercises.find((entry) => entry.id === exerciseId);
-    const baseline = draft.baselineInputs[exerciseId] || { targetLoad: "", targetSets: 3, repRangeMin: 8, repRangeMax: 12 };
-    return `
-      <article class="baseline-card">
-        <h4>${exercise.name}</h4>
-        <div class="grid-three">
-          <label class="field compact">
-            <span>Load</span>
-            <input type="number" min="0" step="2.5" data-baseline-load="${exerciseId}" value="${baseline.targetLoad}" placeholder="kg" />
-          </label>
-          <label class="field compact">
-            <span>Sets</span>
-            <input type="number" min="2" max="8" step="1" data-baseline-sets="${exerciseId}" value="${baseline.targetSets}" />
-          </label>
-          <label class="field compact">
-            <span>Rep range</span>
-            <div class="inline-dual">
-              <input type="number" min="4" max="20" step="1" data-baseline-rep-min="${exerciseId}" value="${baseline.repRangeMin}" />
-              <input type="number" min="4" max="20" step="1" data-baseline-rep-max="${exerciseId}" value="${baseline.repRangeMax}" />
-            </div>
-          </label>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
 function renderDashboard() {
   const { mesocycle, prescriptions, workoutLogs, recommendations } = state.appData;
   const currentWeek = mesocycle.currentWeek;
@@ -605,7 +555,7 @@ function renderDashboard() {
       <section class="subsection">
         <div class="section-title-row">
           <h3>Weekly prescription</h3>
-          <p>Log each set with load, reps, and RIR. Recommendations unlock when the week is logged.</p>
+          <p>${currentWeek === 1 ? "Week 1 is manual: choose your own starting load, then log reps and RIR." : "Log each set with load, reps, and RIR. Recommendations unlock when the week is logged."}</p>
         </div>
         <div class="exercise-groups">
           ${groupedByDay.map(({ day, exercises }) => `
@@ -683,7 +633,7 @@ function renderWorkoutLogger(exercise, savedLogs) {
       <div class="set-row">
         <span class="set-index">Set ${index + 1}</span>
         <input type="number" min="0" step="1" placeholder="Reps" data-log-reps="${exercise.exerciseId}:${index + 1}" value="${saved.reps || ""}" />
-        <input type="number" min="0" step="2.5" placeholder="Load" data-log-load="${exercise.exerciseId}:${index + 1}" value="${saved.load || exercise.targetLoad || ""}" />
+        <input type="number" min="0" step="2.5" placeholder="Load" data-log-load="${exercise.exerciseId}:${index + 1}" value="${saved.load || (exercise.targetLoad ? exercise.targetLoad : "")}" />
         <input type="number" min="0" max="5" step="0.5" placeholder="RIR" data-log-rir="${exercise.exerciseId}:${index + 1}" value="${saved.rir || ""}" />
       </div>
     `;
@@ -694,7 +644,7 @@ function renderWorkoutLogger(exercise, savedLogs) {
       <div class="section-title-row">
         <div>
           <strong>${exercise.exerciseName}</strong>
-          <p class="muted">${exercise.repRange[0]}-${exercise.repRange[1]} reps · ${exercise.targetLoad || 0} load target</p>
+          <p class="muted">${exercise.repRange[0]}-${exercise.repRange[1]} reps · ${exercise.targetLoad ? `${exercise.targetLoad} load target` : "choose your own load"}</p>
         </div>
         <span>${exercise.targetSets} sets</span>
       </div>
@@ -895,19 +845,6 @@ function bindBuilderEvents() {
     persistAndRender();
   });
 
-  app.querySelectorAll("[data-baseline-load]").forEach((input) => {
-    input.addEventListener("input", updateBaselineState);
-  });
-  app.querySelectorAll("[data-baseline-sets]").forEach((input) => {
-    input.addEventListener("input", updateBaselineState);
-  });
-  app.querySelectorAll("[data-baseline-rep-min]").forEach((input) => {
-    input.addEventListener("input", updateBaselineState);
-  });
-  app.querySelectorAll("[data-baseline-rep-max]").forEach((input) => {
-    input.addEventListener("input", updateBaselineState);
-  });
-
   app.querySelector("#builder-back")?.addEventListener("click", () => {
     state.draft.builderStep = Math.max(0, state.draft.builderStep - 1);
     persistAndRender();
@@ -932,18 +869,9 @@ function bindBuilderEvents() {
   app.querySelector("#create-cycle").addEventListener("click", () => {
     const exerciseSelections = flattenExerciseSelections(state.draft);
     const missing = getMissingExerciseAssignments(state.draft);
-    const missingBaselines = exerciseSelections.some((selection) => {
-      const baseline = state.draft.baselineInputs[selection.exerciseId];
-      return !baseline || !baseline.targetLoad || !baseline.repRangeMin || !baseline.repRangeMax || !baseline.targetSets;
-    });
 
     if (missing.length) {
       window.alert(`Choose at least one exercise for: ${missing.join(", ")}`);
-      return;
-    }
-
-    if (missingBaselines) {
-      window.alert("Please enter baseline load, sets, and rep range for every selected exercise.");
       return;
     }
 
@@ -953,7 +881,6 @@ function bindBuilderEvents() {
       priorities: state.draft.priorities,
       dayAssignments: state.draft.dayAssignments,
       exerciseSelections,
-      baselineInputs: normalizeBaselineInputs(state.draft.baselineInputs),
       exerciseIndex: buildExerciseIndex()
     });
     persistAndRender();
@@ -1035,32 +962,6 @@ function bindDashboardEvents() {
   });
 }
 
-function updateBaselineState(event) {
-  const [kind, exerciseId] = Object.entries(event.target.dataset)[0];
-  const baseline = state.draft.baselineInputs[exerciseId] || {
-    targetLoad: "",
-    targetSets: 3,
-    repRangeMin: 8,
-    repRangeMax: 12
-  };
-
-  if (kind === "baselineLoad") {
-    baseline.targetLoad = event.target.value;
-  }
-  if (kind === "baselineSets") {
-    baseline.targetSets = Number(event.target.value);
-  }
-  if (kind === "baselineRepMin") {
-    baseline.repRangeMin = Number(event.target.value);
-  }
-  if (kind === "baselineRepMax") {
-    baseline.repRangeMax = Number(event.target.value);
-  }
-
-  state.draft.baselineInputs[exerciseId] = baseline;
-  saveState(state);
-}
-
 function flattenExerciseSelections(draft) {
   const selections = [];
   draft.dayAssignments.forEach((day, dayIndex) => {
@@ -1092,19 +993,6 @@ function getMissingExerciseAssignments(draft) {
   });
 
   return missing;
-}
-
-function normalizeBaselineInputs(inputs) {
-  return Object.fromEntries(
-    Object.entries(inputs).map(([exerciseId, value]) => [
-      exerciseId,
-      {
-        targetLoad: Number(value.targetLoad),
-        targetSets: Number(value.targetSets),
-        repRange: [Number(value.repRangeMin), Number(value.repRangeMax)]
-      }
-    ])
-  );
 }
 
 function collectWeekLogs() {

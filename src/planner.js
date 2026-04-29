@@ -66,7 +66,7 @@ export function createMesocycle({
   priorities,
   dayAssignments,
   exerciseSelections,
-  baselineInputs,
+  baselineInputs = {},
   exerciseIndex
 }) {
   const mesocycleId = createId("mesocycle");
@@ -135,7 +135,7 @@ export function generateWeekOnePrescription(mesocycle, baselineInputs, exerciseI
       targetSets: muscleSetAllocations.get(selection.id) || baseline?.targetSets || 3,
       repRange,
       targetLoad: Number(baseline?.targetLoad || 0),
-      notes: baseline?.notes || "Start at a controlled 2-3 RIR baseline."
+      notes: baseline?.notes || "Week 1 is exploratory: choose your own load and log reps plus RIR."
     };
   });
 }
@@ -290,7 +290,8 @@ export function summarizeExerciseLogs(logEntries) {
 
 export function recommendExerciseProgression({ current, performance, priority, nextSets }) {
   const safePriority = priority || "MAINTAIN";
-  let targetLoad = current.targetLoad;
+  const currentLoad = current.targetLoad || performance.averageLoad || 0;
+  let targetLoad = currentLoad;
   let repRange = [...current.repRange];
   let reason = "Hold steady while accumulating quality work.";
 
@@ -298,17 +299,17 @@ export function recommendExerciseProgression({ current, performance, priority, n
   const setCap = priorityConfig.weeklySets.end;
 
   if (performance.averageRir >= 3 && performance.averageReps >= repRange[1] - 1) {
-    targetLoad = roundToIncrement(current.targetLoad + Math.max(2.5, current.targetLoad * 0.025));
+    targetLoad = roundToIncrement(currentLoad + Math.max(2.5, currentLoad * 0.025));
     reason = "Increase load: you reached the top of the range with room left in reserve.";
   } else if (performance.averageRir >= 2.5) {
     repRange = [repRange[0] + 1, repRange[1] + 1];
     reason = "Increase reps: effort stayed low, so build more work before the next load jump.";
   } else if (performance.averageRir <= 0.5) {
-    targetLoad = roundToIncrement(current.targetLoad * 0.975);
+    targetLoad = roundToIncrement(currentLoad * 0.975);
     repRange = [Math.max(4, repRange[0] - 1), Math.max(6, repRange[1] - 1)];
     reason = "Reduce load slightly: fatigue was high and reps got too close to failure.";
   } else if (performance.averageReps < repRange[0]) {
-    targetLoad = roundToIncrement(current.targetLoad * 0.98);
+    targetLoad = roundToIncrement(currentLoad * 0.98);
     reason = "Ease load slightly so next week lands back inside the target rep range.";
   }
 
