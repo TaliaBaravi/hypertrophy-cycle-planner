@@ -730,6 +730,7 @@ function renderDashboard() {
 
 function renderWorkoutLogger(exercise, savedLogs) {
   const logs = savedLogs.filter((entry) => entry.exerciseId === exercise.exerciseId);
+  const targetRir = getTargetRir(state.appData.mesocycle.currentWeek);
   const rows = Array.from({ length: exercise.targetSets }, (_, index) => {
     const saved = logs[index] || {};
     return `
@@ -737,7 +738,7 @@ function renderWorkoutLogger(exercise, savedLogs) {
         <span class="set-index">Set ${index + 1}</span>
         <input type="number" min="0" step="1" placeholder="Reps" data-log-reps="${exercise.exerciseId}:${index + 1}" value="${saved.reps || ""}" />
         <input type="number" min="0" step="2.5" placeholder="Load" data-log-load="${exercise.exerciseId}:${index + 1}" value="${saved.load || (exercise.targetLoad ? exercise.targetLoad : "")}" />
-        <input type="number" min="0" max="5" step="0.5" placeholder="RIR" data-log-rir="${exercise.exerciseId}:${index + 1}" value="${saved.rir || ""}" />
+        <div class="set-rir-badge">RIR ${saved.rir || targetRir}</div>
       </div>
     `;
   }).join("");
@@ -747,7 +748,7 @@ function renderWorkoutLogger(exercise, savedLogs) {
       <div class="section-title-row">
         <div>
           <strong>${exercise.exerciseName}</strong>
-          <p class="muted">${exercise.repRange[0]}-${exercise.repRange[1]} reps · ${exercise.targetLoad ? `${exercise.targetLoad} load target` : "choose your own load"}</p>
+          <p class="muted">${exercise.repRange[0]}-${exercise.repRange[1]} reps · ${exercise.targetLoad ? `${exercise.targetLoad} load target` : "choose your own load"} · target RIR ${targetRir}</p>
         </div>
         <span>${exercise.targetSets} sets</span>
       </div>
@@ -1038,6 +1039,10 @@ function bindBuilderEvents() {
   });
 }
 
+function getTargetRir(weekNumber) {
+  return weekNumber <= 2 ? 2 : 1;
+}
+
 function getBuilderStepValidationError(step, draft) {
   if (step === 2) {
     const assignedMuscles = draft.dayAssignments.flatMap((day) => day.assignedMuscles);
@@ -1149,14 +1154,14 @@ function collectWeekLogs() {
   const week = state.appData.mesocycle.currentWeek;
   const prescription = state.appData.prescriptions[week];
   const entries = [];
+  const targetRir = getTargetRir(week);
 
   prescription.forEach((item) => {
     Array.from({ length: item.targetSets }, (_, index) => index + 1).forEach((setNumber) => {
       const reps = app.querySelector(`[data-log-reps="${item.exerciseId}:${setNumber}"]`)?.value;
       const load = app.querySelector(`[data-log-load="${item.exerciseId}:${setNumber}"]`)?.value;
-      const rir = app.querySelector(`[data-log-rir="${item.exerciseId}:${setNumber}"]`)?.value;
 
-      if (reps !== "" && load !== "" && rir !== "") {
+      if (reps !== "" && load !== "") {
         entries.push({
           id: createId("set-log"),
           workoutLogId: `${week}-${item.trainingDayId}`,
@@ -1165,7 +1170,7 @@ function collectWeekLogs() {
           setNumber,
           reps: Number(reps),
           load: Number(load),
-          rir: Number(rir)
+          rir: targetRir
         });
       }
     });

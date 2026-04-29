@@ -558,6 +558,19 @@ select {
   color: var(--text);
 }
 
+.set-rir-badge {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  padding: 0.72rem;
+  border-radius: 12px;
+  border: 1px solid rgba(70, 199, 255, 0.14);
+  background: rgba(18, 30, 50, 0.94);
+  color: var(--brand);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
 .set-index {
   font-family: var(--font-display);
   font-size: 0.9rem;
