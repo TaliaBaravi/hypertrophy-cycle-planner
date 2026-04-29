@@ -114,11 +114,6 @@ export function createMesocycle({
 }
 
 export function generateWeekOnePrescription(mesocycle, baselineInputs, exerciseIndex) {
-  const buildWeek = 1;
-  const muscleTargets = createMuscleTargets(mesocycle, buildWeek);
-  const selectionsByMuscle = groupSelectionsByMuscle(mesocycle.exerciseSelections);
-  const muscleSetAllocations = allocateSetsAcrossSelections(muscleTargets, selectionsByMuscle);
-
   return mesocycle.exerciseSelections.map((selection) => {
     const exercise = exerciseIndex[selection.exerciseId];
     const baseline = baselineInputs[selection.exerciseId];
@@ -132,7 +127,7 @@ export function generateWeekOnePrescription(mesocycle, baselineInputs, exerciseI
       exerciseId: selection.exerciseId,
       exerciseName: exercise.name,
       muscleGroupId: selection.muscleGroupId,
-      targetSets: muscleSetAllocations.get(selection.id) || baseline?.targetSets || 3,
+      targetSets: 2,
       repRange,
       targetLoad: Number(baseline?.targetLoad || 0),
       notes: baseline?.notes || "Week 1 is exploratory: choose your own load and log reps plus RIR."
