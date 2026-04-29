@@ -18,6 +18,12 @@ npm run dev
 
 Then open [http://localhost:4173](http://localhost:4173).
 
+Local development uses Python's built-in static file server so the app behaves the same way locally and on Vercel.
+
+## Deploy to Vercel
+
+This project is a static site. Vercel should deploy the repository root directly, and [vercel.json](/Users/taliabaravi/Documents/bulking%202026/vercel.json) rewrites `/` to `index.html` so the homepage loads at the root URL.
+
 ## Test
 
 ```bash
