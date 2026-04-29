@@ -424,7 +424,7 @@ function autoFillExerciseSelections(draft, exercises) {
         exercises.filter((exercise) => exercise.primaryMuscle === muscleId)
       );
 
-      const targetCount = Math.min(pool.length, pool.length >= 2 ? 2 : 1);
+      const targetCount = Math.min(pool.length, 1);
       nextSelections[key] = pool.slice(0, targetCount).map((exercise) => exercise.id);
     });
   });
