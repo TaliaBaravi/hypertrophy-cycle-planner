@@ -6,7 +6,7 @@ import {
   getWeekLabel,
   validateSplit
 } from "./planner.js";
-import { clearState, loadState, saveState } from "./storage.js";
+import { loadState, saveState } from "./storage.js";
 import { createId, formatPriority } from "./utils.js";
 
 const app = document.querySelector("#app");
@@ -39,10 +39,12 @@ const BUILDER_STEPS = [
 
 let state = loadState() || {
   customExercises: [],
+  templates: [],
   appData: null,
   draft: createInitialDraft()
 };
 
+state.templates ??= [];
 state.draft.builderStep ??= 0;
 state.draft.priorities ??= {};
 state.draft.prioritySelections ??= {
@@ -52,6 +54,8 @@ state.draft.prioritySelections ??= {
 };
 state.draft.priorityModal ??= null;
 state.draft.exerciseDrafts ??= {};
+state.draft.templateModal ??= false;
+state.draft.templateName ??= "";
 
 render();
 
@@ -72,6 +76,8 @@ function createInitialDraft() {
     },
     priorityModal: null,
     exerciseDrafts: {},
+    templateModal: false,
+    templateName: "",
     builderStep: 0
   };
 }
@@ -123,6 +129,7 @@ function renderBuilder() {
       <section class="builder-stage">
         ${renderBuilderStepContent(draft, exercises, warnings)}
       </section>
+      ${renderTemplateModal(draft)}
 
       <section class="subsection">
         <div class="section-title-row">
@@ -156,7 +163,10 @@ function renderBuilder() {
       <div class="action-row">
         <div class="builder-nav">
           <button id="builder-back" class="ghost-button" ${draft.builderStep === 0 ? "disabled" : ""}>Back</button>
-          ${isLastStep ? `<button id="create-cycle" class="primary-button">Create mesocycle</button>` : `<button id="builder-next" class="primary-button">Continue</button>`}
+          ${isLastStep ? `
+            <button id="save-template" class="secondary-button">Save as template</button>
+            <button id="create-cycle" class="primary-button">Start week 1</button>
+          ` : `<button id="builder-next" class="primary-button">Continue</button>`}
         </div>
         <button id="reset-builder" class="ghost-button">Reset builder</button>
       </div>
@@ -172,6 +182,15 @@ function renderBuilderStepContent(draft, exercises, warnings) {
   switch (draft.builderStep) {
     case 0:
       return `
+        <div class="section-title-row">
+          <h3>Saved mesocycles</h3>
+          <p>Start from an existing template instead of building from scratch.</p>
+        </div>
+        ${state.templates.length ? `
+          <div class="template-list">
+            ${state.templates.map((template) => renderTemplateCard(template)).join("")}
+          </div>
+        ` : `<p class="muted">No saved templates yet. Build a plan once and save it before starting week 1.</p>`}
         <div class="grid-two">
           <label class="field">
             <span>Build phase length</span>
@@ -272,6 +291,27 @@ function renderBuilderStepContent(draft, exercises, warnings) {
     default:
       return ``;
   }
+}
+
+function renderTemplateCard(template) {
+  const priorityCount = Object.keys(template.priorities || {}).length;
+  const exerciseCount = Object.values(template.exerciseSelections || {}).flat().length;
+
+  return `
+    <article class="template-card">
+      <div class="section-title-row">
+        <div>
+          <h4>${escapeHtml(template.name)}</h4>
+          <p>${template.trainingDays} days · ${template.buildWeeks} + deload</p>
+        </div>
+        <button type="button" class="secondary-button" data-template-use="${template.id}">Use template</button>
+      </div>
+      <div class="selected-muscles">
+        <span class="selected-muscle-pill selected-muscle-pill--static">Priorities: ${priorityCount}</span>
+        <span class="selected-muscle-pill selected-muscle-pill--static">Exercises: ${exerciseCount}</span>
+      </div>
+    </article>
+  `;
 }
 
 function renderPriorityBucket(level, draft) {
@@ -393,6 +433,34 @@ function renderPriorityModal(draft) {
   `;
 }
 
+function renderTemplateModal(draft) {
+  if (!draft.templateModal) {
+    return "";
+  }
+
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card">
+        <div class="section-title-row">
+          <div>
+            <h3>Save mesocycle template</h3>
+            <p>Give this plan a name so you can reuse it next time instead of building from scratch.</p>
+          </div>
+          <button type="button" class="ghost-button" data-template-close>Close</button>
+        </div>
+        <label class="field">
+          <span>Template name</span>
+          <input type="text" data-template-name value="${escapeHtml(draft.templateName)}" placeholder="Push Pull Legs - Spring" />
+        </label>
+        <div class="builder-nav modal-actions">
+          <button type="button" class="ghost-button" data-template-close>Cancel</button>
+          <button type="button" class="primary-button" data-template-save ${draft.templateName.trim() ? "" : "disabled"}>Save template</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function autoFillExerciseSelections(draft, exercises) {
   const nextSelections = { ...draft.exerciseSelections };
 
@@ -472,6 +540,41 @@ function syncDraftToPriorities(draft) {
     };
   });
   draft.exerciseDrafts = nextExerciseDrafts;
+}
+
+function createTemplateFromDraft(draft) {
+  return {
+    id: createId("template"),
+    name: draft.templateName.trim(),
+    buildWeeks: draft.buildWeeks,
+    trainingDays: draft.trainingDays,
+    priorities: structuredClone(draft.priorities),
+    dayAssignments: structuredClone(draft.dayAssignments),
+    exerciseSelections: structuredClone(draft.exerciseSelections)
+  };
+}
+
+function createDraftFromTemplate(template) {
+  return {
+    buildWeeks: template.buildWeeks,
+    trainingDays: template.trainingDays,
+    priorities: structuredClone(template.priorities || {}),
+    dayAssignments: structuredClone(template.dayAssignments || []).map((day, index) => ({
+      name: day.name || `Day ${index + 1}`,
+      assignedMuscles: [...(day.assignedMuscles || [])]
+    })),
+    exerciseSelections: structuredClone(template.exerciseSelections || {}),
+    prioritySelections: {
+      HIGH: [],
+      MEDIUM: [],
+      MAINTAIN: []
+    },
+    priorityModal: null,
+    exerciseDrafts: {},
+    templateModal: false,
+    templateName: "",
+    builderStep: 0
+  };
 }
 
 function getExerciseDraft(dayIndex, draft, day) {
@@ -740,6 +843,17 @@ function bindBuilderEvents() {
     });
   });
 
+  app.querySelectorAll("[data-template-use]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const template = state.templates.find((entry) => entry.id === event.currentTarget.dataset.templateUse);
+      if (!template) {
+        return;
+      }
+      state.draft = createDraftFromTemplate(template);
+      persistAndRender();
+    });
+  });
+
   app.querySelector("#auto-fill-split")?.addEventListener("click", () => {
     const didFill = autoFillSplitFromPriorities(state.draft);
     if (!didFill) {
@@ -861,8 +975,45 @@ function bindBuilderEvents() {
     persistAndRender();
   });
 
+  app.querySelector("#save-template")?.addEventListener("click", () => {
+    state.draft.templateModal = true;
+    if (!state.draft.templateName.trim()) {
+      state.draft.templateName = `Mesocycle ${state.templates.length + 1}`;
+    }
+    persistAndRender();
+  });
+
+  app.querySelectorAll("[data-template-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.draft.templateModal = false;
+      persistAndRender();
+    });
+  });
+
+  app.querySelector("[data-template-name]")?.addEventListener("input", (event) => {
+    state.draft.templateName = event.target.value;
+    saveState(state);
+    render();
+  });
+
+  app.querySelector("[data-template-save]")?.addEventListener("click", () => {
+    const templateName = state.draft.templateName.trim();
+    if (!templateName) {
+      return;
+    }
+
+    const template = createTemplateFromDraft({
+      ...state.draft,
+      templateName
+    });
+    state.templates = [...state.templates, template];
+    state.draft.templateModal = false;
+    state.draft.templateName = "";
+    persistAndRender();
+  });
+
   app.querySelector("#reset-builder").addEventListener("click", () => {
-    state = { customExercises: [], appData: null, draft: createInitialDraft() };
+    state = { ...state, appData: null, draft: createInitialDraft() };
     persistAndRender();
   });
 
@@ -956,9 +1107,8 @@ function bindDashboardEvents() {
   });
 
   app.querySelector("#restart-app").addEventListener("click", () => {
-    clearState();
-    state = { customExercises: [], appData: null, draft: createInitialDraft() };
-    render();
+    state = { ...state, appData: null, draft: createInitialDraft() };
+    persistAndRender();
   });
 }
 

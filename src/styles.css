@@ -194,6 +194,7 @@ select {
 .grid-three,
 .priority-grid,
 .priority-buckets,
+.template-list,
 .day-grid,
 .exercise-groups,
 .overview-strip,
@@ -223,6 +224,11 @@ select {
 .priority-buckets {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   margin-top: 1rem;
+}
+
+.template-list {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin: 1rem 0 1.25rem;
 }
 
 .day-grid,
@@ -275,6 +281,7 @@ select {
 .day-card,
 .exercise-card,
 .priority-bucket,
+.template-card,
 .baseline-card,
 .logger-card,
 .review-card,
