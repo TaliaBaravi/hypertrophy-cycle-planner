@@ -50,21 +50,31 @@ let state = loadState() || {
 };
 
 state.draft.builderStep ??= 0;
+state.draft.priorities ??= {};
+state.draft.prioritySelections ??= {
+  HIGH: "",
+  MEDIUM: "",
+  MAINTAIN: ""
+};
 
 render();
 
 function createInitialDraft() {
-  const priorities = Object.fromEntries(MUSCLE_GROUPS.map((muscle) => [muscle.id, "MEDIUM"]));
   return {
     buildWeeks: 6,
     trainingDays: 4,
-    priorities,
+    priorities: {},
     dayAssignments: Array.from({ length: 4 }, (_, index) => ({
       name: `Day ${index + 1}`,
       assignedMuscles: []
     })),
     exerciseSelections: {},
     baselineInputs: {},
+    prioritySelections: {
+      HIGH: "",
+      MEDIUM: "",
+      MAINTAIN: ""
+    },
     builderStep: 0
   };
 }
@@ -93,6 +103,7 @@ function renderBuilder() {
   const selectedExerciseIds = Object.values(draft.exerciseSelections).flat();
   const assignedBlocks = draft.dayAssignments.reduce((count, day) => count + day.assignedMuscles.length, 0);
   const isLastStep = draft.builderStep === BUILDER_STEPS.length - 1;
+  const selectedPriorityCount = Object.keys(draft.priorities).length;
 
   app.innerHTML = `
     <section class="panel">
@@ -129,6 +140,10 @@ function renderBuilder() {
           <div class="overview-item">
             <span>Cycle</span>
             <strong>${draft.buildWeeks} + deload</strong>
+          </div>
+          <div class="overview-item">
+            <span>Priorities set</span>
+            <strong>${selectedPriorityCount}</strong>
           </div>
           <div class="overview-item">
             <span>Muscle blocks</span>
@@ -203,17 +218,10 @@ function renderBuilderStepContent(draft, exercises, warnings) {
       return `
         <div class="section-title-row">
           <h3>Muscle priorities</h3>
-          <p>High gets more weekly sets and a steeper climb. Maintain stays stable.</p>
+          <p>Choose muscles inside each priority bucket. A muscle can appear only once, and you can leave some muscles unassigned.</p>
         </div>
-        <div class="priority-grid">
-          ${MUSCLE_GROUPS.map((muscle) => `
-            <label class="field compact">
-              <span>${muscle.name}</span>
-              <select data-priority="${muscle.id}">
-                ${PRIORITY_LEVELS.map((level) => `<option value="${level}" ${draft.priorities[muscle.id] === level ? "selected" : ""}>${formatPriority(level)}</option>`).join("")}
-              </select>
-            </label>
-          `).join("")}
+        <div class="priority-buckets">
+          ${PRIORITY_LEVELS.map((level) => renderPriorityBucket(level, draft)).join("")}
         </div>
       `;
     case 2:
@@ -291,6 +299,63 @@ function renderBuilderStepContent(draft, exercises, warnings) {
   }
 }
 
+function renderPriorityBucket(level, draft) {
+  const selectedMuscles = getPriorityMuscles(level, draft.priorities);
+  const availableMuscles = getAvailablePriorityMuscles(level, draft.priorities);
+  const selectedOption =
+    availableMuscles.find((muscle) => muscle.id === draft.prioritySelections[level])?.id || "";
+
+  return `
+    <article class="priority-bucket">
+      <div class="section-title-row">
+        <div>
+          <h4>${formatPriority(level)}</h4>
+          <p>${getPriorityDescription(level)}</p>
+        </div>
+        <span>${selectedMuscles.length} selected</span>
+      </div>
+      <div class="bucket-picker">
+        <label class="field compact">
+          <span>Add muscle</span>
+          <select data-priority-select="${level}">
+            <option value="">Choose a muscle</option>
+            ${availableMuscles.map((muscle) => `<option value="${muscle.id}" ${selectedOption === muscle.id ? "selected" : ""}>${muscle.name}</option>`).join("")}
+          </select>
+        </label>
+        <button type="button" class="secondary-button" data-priority-add="${level}" ${selectedOption ? "" : "disabled"}>Add</button>
+      </div>
+      <div class="selected-muscles">
+        ${selectedMuscles.length ? selectedMuscles.map((muscle) => `
+          <button type="button" class="selected-muscle-pill" data-priority-remove="${level}:${muscle.id}">
+            <span>${muscle.name}</span>
+            <strong>Remove</strong>
+          </button>
+        `).join("") : `<p class="muted">No muscles assigned here yet.</p>`}
+      </div>
+    </article>
+  `;
+}
+
+function getPriorityMuscles(level, priorities) {
+  return MUSCLE_GROUPS.filter((muscle) => priorities[muscle.id] === level);
+}
+
+function getAvailablePriorityMuscles(level, priorities) {
+  return MUSCLE_GROUPS.filter((muscle) => !priorities[muscle.id] || priorities[muscle.id] === level);
+}
+
+function getPriorityDescription(level) {
+  if (level === "HIGH") {
+    return "More weekly sets and the most aggressive upward progression.";
+  }
+
+  if (level === "MEDIUM") {
+    return "Solid growth focus without pushing volume as hard.";
+  }
+
+  return "Lower stable volume for muscles you only want to maintain.";
+}
+
 function renderBaselineInputs(draft, exercises) {
   const selectedExerciseIds = Object.values(draft.exerciseSelections).flat();
   if (!selectedExerciseIds.length) {
@@ -336,6 +401,7 @@ function renderDashboard() {
   }));
   const weekRecommendations = recommendations[currentWeek] || [];
   const isDeloadWeek = currentWeek > mesocycle.buildWeeks;
+  const selectedPriorityMuscles = MUSCLE_GROUPS.filter((muscle) => mesocycle.priorities[muscle.id]);
 
   app.innerHTML = `
     <section class="panel">
@@ -351,12 +417,12 @@ function renderDashboard() {
       </div>
 
       <section class="overview-strip">
-        ${MUSCLE_GROUPS.map((muscle) => `
+        ${selectedPriorityMuscles.length ? selectedPriorityMuscles.map((muscle) => `
           <div class="overview-item">
             <span>${muscle.name}</span>
             <strong>${formatPriority(mesocycle.priorities[muscle.id])}</strong>
           </div>
-        `).join("")}
+        `).join("") : `<div class="overview-item"><span>Priorities</span><strong>Not set</strong></div>`}
       </section>
 
       ${mesocycle.warnings.length ? `<div class="warning-box">${mesocycle.warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : ""}
@@ -478,9 +544,34 @@ function bindBuilderEvents() {
     persistAndRender();
   });
 
-  app.querySelectorAll("[data-priority]").forEach((select) => {
+  app.querySelectorAll("[data-priority-select]").forEach((select) => {
     select.addEventListener("change", (event) => {
-      state.draft.priorities[event.target.dataset.priority] = event.target.value;
+      state.draft.prioritySelections[event.target.dataset.prioritySelect] = event.target.value;
+      saveState(state);
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-priority-add]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const level = event.currentTarget.dataset.priorityAdd;
+      const muscleId = state.draft.prioritySelections[level];
+      if (!muscleId) {
+        return;
+      }
+
+      state.draft.priorities[muscleId] = level;
+      state.draft.prioritySelections[level] = "";
+      persistAndRender();
+    });
+  });
+
+  app.querySelectorAll("[data-priority-remove]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const [level, muscleId] = event.currentTarget.dataset.priorityRemove.split(":");
+      if (state.draft.priorities[muscleId] === level) {
+        delete state.draft.priorities[muscleId];
+      }
       persistAndRender();
     });
   });

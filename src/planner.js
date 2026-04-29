@@ -122,7 +122,8 @@ export function generateWeekOnePrescription(mesocycle, baselineInputs, exerciseI
   return mesocycle.exerciseSelections.map((selection) => {
     const exercise = exerciseIndex[selection.exerciseId];
     const baseline = baselineInputs[selection.exerciseId];
-    const repRange = baseline?.repRange || PRIORITY_CONFIG[mesocycle.priorities[selection.muscleGroupId]].repRange;
+    const priority = mesocycle.priorities[selection.muscleGroupId] || "MAINTAIN";
+    const repRange = baseline?.repRange || PRIORITY_CONFIG[priority].repRange;
     return {
       id: createId("prescription"),
       mesocycleId: mesocycle.id,
@@ -288,12 +289,12 @@ export function summarizeExerciseLogs(logEntries) {
 }
 
 export function recommendExerciseProgression({ current, performance, priority, nextSets }) {
+  const safePriority = priority || "MAINTAIN";
   let targetLoad = current.targetLoad;
   let repRange = [...current.repRange];
   let reason = "Hold steady while accumulating quality work.";
 
-  const repSpan = repRange[1] - repRange[0];
-  const priorityConfig = PRIORITY_CONFIG[priority];
+  const priorityConfig = PRIORITY_CONFIG[safePriority];
   const setCap = priorityConfig.weeklySets.end;
 
   if (performance.averageRir >= 3 && performance.averageReps >= repRange[1] - 1) {

@@ -3,6 +3,10 @@ export function createId(prefix) {
 }
 
 export function formatPriority(priority) {
+  if (!priority) {
+    return "Not set";
+  }
+
   return priority.charAt(0) + priority.slice(1).toLowerCase();
 }
 

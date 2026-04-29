@@ -193,6 +193,7 @@ select {
 .grid-two,
 .grid-three,
 .priority-grid,
+.priority-buckets,
 .day-grid,
 .exercise-groups,
 .overview-strip,
@@ -217,6 +218,11 @@ select {
 
 .priority-grid {
   grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+}
+
+.priority-buckets {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 1rem;
 }
 
 .day-grid,
@@ -268,6 +274,7 @@ select {
 
 .day-card,
 .exercise-card,
+.priority-bucket,
 .baseline-card,
 .logger-card,
 .review-card,
@@ -283,6 +290,46 @@ select {
   flex-wrap: wrap;
   gap: 0.6rem;
   margin-top: 0.75rem;
+}
+
+.bucket-picker,
+.selected-muscles {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bucket-picker {
+  align-items: end;
+  margin-top: 1rem;
+}
+
+.bucket-picker .field {
+  flex: 1;
+}
+
+.selected-muscles {
+  margin-top: 1rem;
+}
+
+.selected-muscle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(70, 199, 255, 0.14);
+  background: rgba(18, 30, 50, 0.94);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.selected-muscle-pill strong {
+  color: var(--brand);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .checkbox-pill {
