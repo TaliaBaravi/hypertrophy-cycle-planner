@@ -57,7 +57,7 @@ state.draft.prioritySelections ??= {
   MAINTAIN: []
 };
 state.draft.priorityModal ??= null;
-state.draft.exerciseModal ??= null;
+state.draft.exerciseDrafts ??= {};
 
 render();
 
@@ -78,7 +78,7 @@ function createInitialDraft() {
       MAINTAIN: []
     },
     priorityModal: null,
-    exerciseModal: null,
+    exerciseDrafts: {},
     builderStep: 0
   };
 }
@@ -173,28 +173,9 @@ function renderBuilder() {
   bindBuilderEvents();
 }
 
-function renderExerciseSelector(dayIndex, muscleId, draft, exercises) {
-  const key = `${dayIndex}:${muscleId}`;
-  const selected = draft.exerciseSelections[key] || [];
-  const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
-
-  return `
-    <button type="button" class="exercise-selector exercise-selector-button" data-exercise-open="${dayIndex}:${muscleId}">
-      <div class="exercise-selector-header">
-        <strong>${muscle.name}</strong>
-        <span>${selected.length ? `${selected.length} selected` : "Open exercises"}</span>
-      </div>
-      <div class="selected-muscles">
-        ${selected.length ? selected.map((exerciseId) => {
-          const exercise = exercises.find((entry) => entry.id === exerciseId);
-          return `<span class="selected-muscle-pill selected-muscle-pill--static">${exercise?.name || exerciseId}</span>`;
-        }).join("") : `<p class="muted">Tap to choose exercises for this muscle.</p>`}
-      </div>
-    </button>
-  `;
-}
-
 function renderBuilderStepContent(draft, exercises, warnings) {
+  const prioritizedMuscles = MUSCLE_GROUPS.filter((muscle) => draft.priorities[muscle.id]);
+
   switch (draft.builderStep) {
     case 0:
       return `
@@ -230,27 +211,32 @@ function renderBuilderStepContent(draft, exercises, warnings) {
       return `
         <div class="section-title-row">
           <h3>Weekly split</h3>
-          <p>Assign muscles to each day. High-priority muscles should usually appear at least twice.</p>
+          <p>Assign only the muscles you selected in priorities. High-priority muscles should usually appear at least twice.</p>
         </div>
-        <div class="day-grid">
-          ${draft.dayAssignments.map((day, index) => `
-            <article class="day-card">
-              <label class="field">
-                <span>Day label</span>
-                <input type="text" data-day-name="${index}" value="${escapeHtml(day.name)}" />
-              </label>
-              <div class="checkbox-list">
-                ${MUSCLE_GROUPS.map((muscle) => `
-                  <label class="checkbox-pill">
-                    <input type="checkbox" data-day-muscle="${index}" value="${muscle.id}" ${day.assignedMuscles.includes(muscle.id) ? "checked" : ""} />
-                    <span>${muscle.name}</span>
-                  </label>
-                `).join("")}
-              </div>
-            </article>
-          `).join("")}
+        <div class="builder-nav">
+          <button type="button" class="secondary-button" id="auto-fill-split">Auto fill split</button>
         </div>
-        ${warnings.length ? `<div class="warning-box">${warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : `<p class="success-line">Split coverage looks workable for the selected priorities.</p>`}
+        ${prioritizedMuscles.length ? `
+          <div class="day-grid">
+            ${draft.dayAssignments.map((day, index) => `
+              <article class="day-card">
+                <label class="field">
+                  <span>Day label</span>
+                  <input type="text" data-day-name="${index}" value="${escapeHtml(day.name)}" />
+                </label>
+                <div class="checkbox-list">
+                  ${prioritizedMuscles.map((muscle) => `
+                    <label class="checkbox-pill">
+                      <input type="checkbox" data-day-muscle="${index}" value="${muscle.id}" ${day.assignedMuscles.includes(muscle.id) ? "checked" : ""} />
+                      <span>${muscle.name}</span>
+                    </label>
+                  `).join("")}
+                </div>
+              </article>
+            `).join("")}
+          </div>
+          ${warnings.length ? `<div class="warning-box">${warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : `<p class="success-line">Split coverage looks workable for the selected priorities.</p>`}
+        ` : `<p class="muted">Choose at least one muscle in the priorities step before building the weekly split.</p>`}
       `;
     case 3:
       return `
@@ -265,11 +251,10 @@ function renderBuilderStepContent(draft, exercises, warnings) {
           ${draft.dayAssignments.map((day, dayIndex) => `
             <article class="exercise-card">
               <h4>${escapeHtml(day.name)}</h4>
-              ${day.assignedMuscles.length ? day.assignedMuscles.map((muscleId) => renderExerciseSelector(dayIndex, muscleId, draft, exercises)).join("") : `<p class="muted">Add muscles to this day in the previous step to unlock exercise choices.</p>`}
+              ${day.assignedMuscles.length ? renderExerciseDayPlanner(dayIndex, day, draft, exercises) : `<p class="muted">Add muscles to this day in the previous step to unlock exercise choices.</p>`}
             </article>
           `).join("")}
         </div>
-        ${renderExerciseModal(draft, exercises)}
         <form class="custom-exercise-form" id="custom-exercise-form">
           <h4>Add a custom exercise</h4>
           <div class="grid-three">
@@ -332,6 +317,62 @@ function renderPriorityBucket(level, draft) {
   `;
 }
 
+function renderExerciseDayPlanner(dayIndex, day, draft, exercises) {
+  const exerciseRows = day.assignedMuscles.flatMap((muscleId) => {
+    const key = `${dayIndex}:${muscleId}`;
+    return (draft.exerciseSelections[key] || []).map((exerciseId) => ({
+      muscleId,
+      exerciseId
+    }));
+  });
+  const dayDraft = getExerciseDraft(dayIndex, draft, day);
+  const availableExercises = dayDraft.muscleId
+    ? exercises.filter((exercise) => exercise.primaryMuscle === dayDraft.muscleId)
+    : [];
+
+  return `
+    <div class="exercise-pair-list">
+      ${exerciseRows.length ? exerciseRows.map((row) => {
+        const muscle = MUSCLE_GROUPS.find((entry) => entry.id === row.muscleId);
+        const exercise = exercises.find((entry) => entry.id === row.exerciseId);
+        return `
+          <div class="exercise-pair-row">
+            <div>
+              <strong>${muscle?.name || row.muscleId}</strong>
+              <span>${exercise?.name || row.exerciseId}</span>
+            </div>
+            <button type="button" class="exercise-remove-button" data-exercise-remove="${dayIndex}:${row.muscleId}:${row.exerciseId}">x</button>
+          </div>
+        `;
+      }).join("") : `<p class="muted">No exercises added yet for this day.</p>`}
+    </div>
+    <div class="exercise-add-panel">
+      <div class="grid-two">
+        <label class="field compact">
+          <span>Muscle</span>
+          <select data-exercise-muscle="${dayIndex}">
+            <option value="">Choose muscle</option>
+            ${day.assignedMuscles.map((muscleId) => {
+              const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
+              return `<option value="${muscleId}" ${dayDraft.muscleId === muscleId ? "selected" : ""}>${muscle?.name || muscleId}</option>`;
+            }).join("")}
+          </select>
+        </label>
+        <label class="field compact">
+          <span>Exercise</span>
+          <select data-exercise-choice="${dayIndex}">
+            <option value="">Choose exercise</option>
+            ${availableExercises.map((exercise) => `<option value="${exercise.id}" ${dayDraft.exerciseId === exercise.id ? "selected" : ""}>${exercise.name}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="builder-nav">
+        <button type="button" class="secondary-button" data-exercise-add="${dayIndex}" ${dayDraft.muscleId && dayDraft.exerciseId ? "" : "disabled"}>Add exercise</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderPriorityModal(draft) {
   if (!draft.priorityModal) {
     return "";
@@ -368,45 +409,6 @@ function renderPriorityModal(draft) {
   `;
 }
 
-function renderExerciseModal(draft, exercises) {
-  if (!draft.exerciseModal) {
-    return "";
-  }
-
-  const [dayIndexValue, muscleId] = draft.exerciseModal.split(":");
-  const dayIndex = Number(dayIndexValue);
-  const day = draft.dayAssignments[dayIndex];
-  const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
-  const key = `${dayIndex}:${muscleId}`;
-  const selected = new Set(draft.exerciseSelections[key] || []);
-  const filtered = exercises.filter((exercise) => exercise.primaryMuscle === muscleId);
-
-  return `
-    <div class="modal-backdrop">
-      <div class="modal-card">
-        <div class="section-title-row">
-          <div>
-            <h3>${muscle?.name || "Muscle"} exercises</h3>
-            <p>${escapeHtml(day?.name || "Day")} · choose one or more exercises for this muscle.</p>
-          </div>
-          <button type="button" class="ghost-button" data-exercise-close>Close</button>
-        </div>
-        <div class="modal-muscle-list">
-          ${filtered.length ? filtered.map((exercise) => `
-            <label class="checkbox-pill checkbox-pill--wide modal-muscle-option">
-              <input type="checkbox" data-exercise-select="${key}" value="${exercise.id}" ${selected.has(exercise.id) ? "checked" : ""} />
-              <span>${exercise.name} · ${exercise.equipment}</span>
-            </label>
-          `).join("") : `<p class="muted">No exercises found for this muscle yet.</p>`}
-        </div>
-        <div class="builder-nav modal-actions">
-          <button type="button" class="ghost-button" data-exercise-close>Done</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function autoFillExerciseSelections(draft, exercises) {
   const nextSelections = { ...draft.exerciseSelections };
 
@@ -428,6 +430,76 @@ function autoFillExerciseSelections(draft, exercises) {
   });
 
   state.draft.exerciseSelections = nextSelections;
+}
+
+function autoFillSplitFromPriorities(draft) {
+  const selectedMuscles = Object.keys(draft.priorities);
+  const trainingDayCount = draft.dayAssignments.length;
+
+  if (!selectedMuscles.length || !trainingDayCount) {
+    return false;
+  }
+
+  const nextDays = draft.dayAssignments.map((day) => ({
+    ...day,
+    assignedMuscles: []
+  }));
+  const appearancesPerMuscle = Math.min(trainingDayCount, 2);
+
+  selectedMuscles.forEach((muscleId) => {
+    const randomizedDayIndexes = shuffleArray(
+      Array.from({ length: trainingDayCount }, (_, index) => index)
+    ).slice(0, appearancesPerMuscle);
+
+    randomizedDayIndexes.forEach((dayIndex) => {
+      nextDays[dayIndex].assignedMuscles.push(muscleId);
+    });
+  });
+
+  state.draft.dayAssignments = nextDays;
+  return true;
+}
+
+function syncDraftToPriorities(draft) {
+  const allowedMuscles = new Set(Object.keys(draft.priorities));
+
+  draft.dayAssignments = draft.dayAssignments.map((day) => ({
+    ...day,
+    assignedMuscles: day.assignedMuscles.filter((muscleId) => allowedMuscles.has(muscleId))
+  }));
+
+  const nextExerciseSelections = {};
+  Object.entries(draft.exerciseSelections).forEach(([key, exerciseIds]) => {
+    const [, muscleId] = key.split(":");
+    if (allowedMuscles.has(muscleId)) {
+      nextExerciseSelections[key] = exerciseIds;
+    }
+  });
+  draft.exerciseSelections = nextExerciseSelections;
+
+  const nextExerciseDrafts = {};
+  Object.entries(draft.exerciseDrafts || {}).forEach(([dayIndex, draftValue]) => {
+    const day = draft.dayAssignments[Number(dayIndex)];
+    const fallbackMuscleId = day?.assignedMuscles[0] || "";
+    const muscleId = allowedMuscles.has(draftValue.muscleId) ? draftValue.muscleId : fallbackMuscleId;
+    nextExerciseDrafts[dayIndex] = {
+      muscleId,
+      exerciseId: muscleId === draftValue.muscleId ? draftValue.exerciseId : ""
+    };
+  });
+  draft.exerciseDrafts = nextExerciseDrafts;
+}
+
+function getExerciseDraft(dayIndex, draft, day) {
+  const savedDraft = draft.exerciseDrafts[dayIndex];
+  if (savedDraft) {
+    return savedDraft;
+  }
+
+  return {
+    muscleId: day.assignedMuscles[0] || "",
+    exerciseId: ""
+  };
 }
 
 function shuffleArray(items) {
@@ -702,6 +774,7 @@ function bindBuilderEvents() {
       });
       state.draft.prioritySelections[level] = [];
       state.draft.priorityModal = null;
+      syncDraftToPriorities(state.draft);
       persistAndRender();
     });
   });
@@ -712,20 +785,66 @@ function bindBuilderEvents() {
       if (state.draft.priorities[muscleId] === level) {
         delete state.draft.priorities[muscleId];
       }
+      syncDraftToPriorities(state.draft);
       persistAndRender();
     });
   });
 
-  app.querySelectorAll("[data-exercise-open]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      state.draft.exerciseModal = event.currentTarget.dataset.exerciseOpen;
-      persistAndRender();
-    });
+  app.querySelector("#auto-fill-split")?.addEventListener("click", () => {
+    const didFill = autoFillSplitFromPriorities(state.draft);
+    if (!didFill) {
+      window.alert("Choose at least one muscle in the priorities step before auto-filling the split.");
+      return;
+    }
+    persistAndRender();
   });
 
   app.querySelector("#auto-fill-exercises")?.addEventListener("click", () => {
     autoFillExerciseSelections(state.draft, buildExercisePool());
     persistAndRender();
+  });
+
+  app.querySelectorAll("[data-exercise-muscle]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      const dayIndex = Number(event.target.dataset.exerciseMuscle);
+      state.draft.exerciseDrafts[dayIndex] = {
+        muscleId: event.target.value,
+        exerciseId: ""
+      };
+      persistAndRender();
+    });
+  });
+
+  app.querySelectorAll("[data-exercise-choice]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      const dayIndex = Number(event.target.dataset.exerciseChoice);
+      const current = state.draft.exerciseDrafts[dayIndex] || { muscleId: "", exerciseId: "" };
+      state.draft.exerciseDrafts[dayIndex] = {
+        ...current,
+        exerciseId: event.target.value
+      };
+      saveState(state);
+    });
+  });
+
+  app.querySelectorAll("[data-exercise-add]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const dayIndex = Number(event.currentTarget.dataset.exerciseAdd);
+      const dayDraft = state.draft.exerciseDrafts[dayIndex];
+      if (!dayDraft?.muscleId || !dayDraft?.exerciseId) {
+        return;
+      }
+
+      const key = `${dayIndex}:${dayDraft.muscleId}`;
+      const nextSelection = new Set(state.draft.exerciseSelections[key] || []);
+      nextSelection.add(dayDraft.exerciseId);
+      state.draft.exerciseSelections[key] = [...nextSelection];
+      state.draft.exerciseDrafts[dayIndex] = {
+        muscleId: dayDraft.muscleId,
+        exerciseId: ""
+      };
+      persistAndRender();
+    });
   });
 
   app.querySelectorAll("[data-day-name]").forEach((input) => {
@@ -749,23 +868,13 @@ function bindBuilderEvents() {
     });
   });
 
-  app.querySelectorAll("[data-exercise-select]").forEach((checkbox) => {
-    checkbox.addEventListener("change", (event) => {
-      const key = event.target.dataset.exerciseSelect;
-      const selected = new Set(state.draft.exerciseSelections[key] || []);
-      if (event.target.checked) {
-        selected.add(event.target.value);
-      } else {
-        selected.delete(event.target.value);
-      }
-      state.draft.exerciseSelections[key] = [...selected];
-      persistAndRender();
-    });
-  });
-
-  app.querySelectorAll("[data-exercise-close]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.draft.exerciseModal = null;
+  app.querySelectorAll("[data-exercise-remove]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const [dayIndex, muscleId, exerciseId] = event.currentTarget.dataset.exerciseRemove.split(":");
+      const key = `${dayIndex}:${muscleId}`;
+      state.draft.exerciseSelections[key] = (state.draft.exerciseSelections[key] || []).filter(
+        (selectedId) => selectedId !== exerciseId
+      );
       persistAndRender();
     });
   });

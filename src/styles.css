@@ -299,6 +299,56 @@ select {
   flex-wrap: wrap;
 }
 
+.exercise-pair-list,
+.exercise-add-panel {
+  margin-top: 1rem;
+}
+
+.exercise-pair-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.exercise-pair-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(12, 22, 39, 0.72);
+  border: 1px solid rgba(70, 199, 255, 0.1);
+}
+
+.exercise-pair-row strong,
+.exercise-pair-row span {
+  display: block;
+}
+
+.exercise-pair-row span {
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.exercise-remove-button {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 159, 104, 0.2);
+  background: rgba(255, 159, 104, 0.12);
+  color: var(--warning);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.exercise-add-panel {
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background: rgba(10, 19, 34, 0.56);
+  border: 1px dashed rgba(70, 199, 255, 0.14);
+}
+
 .bucket-picker {
   align-items: center;
   margin-top: 1rem;
