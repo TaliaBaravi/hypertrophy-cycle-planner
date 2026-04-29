@@ -57,6 +57,7 @@ state.draft.prioritySelections ??= {
   MAINTAIN: []
 };
 state.draft.priorityModal ??= null;
+state.draft.exerciseModal ??= null;
 
 render();
 
@@ -77,6 +78,7 @@ function createInitialDraft() {
       MAINTAIN: []
     },
     priorityModal: null,
+    exerciseModal: null,
     builderStep: 0
   };
 }
@@ -175,23 +177,20 @@ function renderExerciseSelector(dayIndex, muscleId, draft, exercises) {
   const key = `${dayIndex}:${muscleId}`;
   const selected = draft.exerciseSelections[key] || [];
   const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
-  const filtered = exercises.filter((exercise) => exercise.primaryMuscle === muscleId);
 
   return `
-    <div class="exercise-selector">
+    <button type="button" class="exercise-selector exercise-selector-button" data-exercise-open="${dayIndex}:${muscleId}">
       <div class="exercise-selector-header">
         <strong>${muscle.name}</strong>
-        <span>${selected.length} selected</span>
+        <span>${selected.length ? `${selected.length} selected` : "Open exercises"}</span>
       </div>
-      <div class="checkbox-list">
-        ${filtered.map((exercise) => `
-          <label class="checkbox-pill checkbox-pill--wide">
-            <input type="checkbox" data-exercise-select="${key}" value="${exercise.id}" ${selected.includes(exercise.id) ? "checked" : ""} />
-            <span>${exercise.name} · ${exercise.equipment}</span>
-          </label>
-        `).join("")}
+      <div class="selected-muscles">
+        ${selected.length ? selected.map((exerciseId) => {
+          const exercise = exercises.find((entry) => entry.id === exerciseId);
+          return `<span class="selected-muscle-pill selected-muscle-pill--static">${exercise?.name || exerciseId}</span>`;
+        }).join("") : `<p class="muted">Tap to choose exercises for this muscle.</p>`}
       </div>
-    </div>
+    </button>
   `;
 }
 
@@ -267,6 +266,7 @@ function renderBuilderStepContent(draft, exercises, warnings) {
             </article>
           `).join("")}
         </div>
+        ${renderExerciseModal(draft, exercises)}
         <form class="custom-exercise-form" id="custom-exercise-form">
           <h4>Add a custom exercise</h4>
           <div class="grid-three">
@@ -359,6 +359,45 @@ function renderPriorityModal(draft) {
         <div class="builder-nav modal-actions">
           <button type="button" class="ghost-button" data-priority-clear="${level}">Clear</button>
           <button type="button" class="primary-button" data-priority-confirm="${level}" ${selectedSet.size ? "" : "disabled"}>Add selected</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderExerciseModal(draft, exercises) {
+  if (!draft.exerciseModal) {
+    return "";
+  }
+
+  const [dayIndexValue, muscleId] = draft.exerciseModal.split(":");
+  const dayIndex = Number(dayIndexValue);
+  const day = draft.dayAssignments[dayIndex];
+  const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
+  const key = `${dayIndex}:${muscleId}`;
+  const selected = new Set(draft.exerciseSelections[key] || []);
+  const filtered = exercises.filter((exercise) => exercise.primaryMuscle === muscleId);
+
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card">
+        <div class="section-title-row">
+          <div>
+            <h3>${muscle?.name || "Muscle"} exercises</h3>
+            <p>${escapeHtml(day?.name || "Day")} · choose one or more exercises for this muscle.</p>
+          </div>
+          <button type="button" class="ghost-button" data-exercise-close>Close</button>
+        </div>
+        <div class="modal-muscle-list">
+          ${filtered.length ? filtered.map((exercise) => `
+            <label class="checkbox-pill checkbox-pill--wide modal-muscle-option">
+              <input type="checkbox" data-exercise-select="${key}" value="${exercise.id}" ${selected.has(exercise.id) ? "checked" : ""} />
+              <span>${exercise.name} · ${exercise.equipment}</span>
+            </label>
+          `).join("") : `<p class="muted">No exercises found for this muscle yet.</p>`}
+        </div>
+        <div class="builder-nav modal-actions">
+          <button type="button" class="ghost-button" data-exercise-close>Done</button>
         </div>
       </div>
     </div>
@@ -642,6 +681,13 @@ function bindBuilderEvents() {
     });
   });
 
+  app.querySelectorAll("[data-exercise-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      state.draft.exerciseModal = event.currentTarget.dataset.exerciseOpen;
+      persistAndRender();
+    });
+  });
+
   app.querySelectorAll("[data-day-name]").forEach((input) => {
     input.addEventListener("input", (event) => {
       state.draft.dayAssignments[Number(event.target.dataset.dayName)].name = event.target.value;
@@ -673,6 +719,13 @@ function bindBuilderEvents() {
         selected.delete(event.target.value);
       }
       state.draft.exerciseSelections[key] = [...selected];
+      persistAndRender();
+    });
+  });
+
+  app.querySelectorAll("[data-exercise-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.draft.exerciseModal = null;
       persistAndRender();
     });
   });

@@ -458,10 +458,25 @@ select {
   margin-top: 0.9rem;
 }
 
+.exercise-selector-button {
+  width: 100%;
+  text-align: left;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(70, 199, 255, 0.12);
+  background: rgba(12, 22, 39, 0.72);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .exercise-selector-header {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.selected-muscle-pill--static {
+  cursor: default;
 }
 
 .set-grid {
