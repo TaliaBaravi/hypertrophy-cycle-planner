@@ -1,0 +1,675 @@
+import { EXERCISE_LIBRARY, MUSCLE_GROUPS, PRIORITY_LEVELS } from "./data.js";
+import {
+  buildLogsByExercise,
+  createMesocycle,
+  generateNextWeekRecommendations,
+  getWeekLabel,
+  validateSplit
+} from "./planner.js";
+import { clearState, loadState, saveState } from "./storage.js";
+import { createId, formatPriority } from "./utils.js";
+
+const app = document.querySelector("#app");
+
+let state = loadState() || {
+  customExercises: [],
+  appData: null,
+  draft: createInitialDraft()
+};
+
+render();
+
+function createInitialDraft() {
+  const priorities = Object.fromEntries(MUSCLE_GROUPS.map((muscle) => [muscle.id, "MEDIUM"]));
+  return {
+    buildWeeks: 6,
+    trainingDays: 4,
+    priorities,
+    dayAssignments: Array.from({ length: 4 }, (_, index) => ({
+      name: `Day ${index + 1}`,
+      assignedMuscles: []
+    })),
+    exerciseSelections: {},
+    baselineInputs: {}
+  };
+}
+
+function render() {
+  if (!state.appData) {
+    renderBuilder();
+    return;
+  }
+
+  renderDashboard();
+}
+
+function renderBuilder() {
+  const draft = state.draft;
+  const warnings = validateSplit(
+    draft.dayAssignments.map((day, index) => ({
+      id: `draft-day-${index}`,
+      dayIndex: index + 1,
+      assignedMuscles: day.assignedMuscles
+    })),
+    draft.priorities
+  );
+  const exercises = [...EXERCISE_LIBRARY, ...state.customExercises];
+
+  app.innerHTML = `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Cycle builder</p>
+          <h2>Create your next mesocycle</h2>
+        </div>
+        <p class="panel-copy">Choose cycle length, priorities, split structure, exercises, and week 1 baselines in one flow.</p>
+      </div>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Build phase length</span>
+          <select name="buildWeeks">
+            <option value="6" ${draft.buildWeeks === 6 ? "selected" : ""}>6 weeks + deload</option>
+            <option value="8" ${draft.buildWeeks === 8 ? "selected" : ""}>8 weeks + deload</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Training days per week</span>
+          <select name="trainingDays">
+            ${[3, 4, 5, 6].map((days) => `<option value="${days}" ${draft.trainingDays === days ? "selected" : ""}>${days} days</option>`).join("")}
+          </select>
+        </label>
+      </div>
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Muscle priorities</h3>
+          <p>High gets more weekly sets and a steeper climb. Maintain stays stable.</p>
+        </div>
+        <div class="priority-grid">
+          ${MUSCLE_GROUPS.map((muscle) => `
+            <label class="field compact">
+              <span>${muscle.name}</span>
+              <select data-priority="${muscle.id}">
+                ${PRIORITY_LEVELS.map((level) => `<option value="${level}" ${draft.priorities[muscle.id] === level ? "selected" : ""}>${formatPriority(level)}</option>`).join("")}
+              </select>
+            </label>
+          `).join("")}
+        </div>
+      </section>
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Weekly split</h3>
+          <p>Assign muscles to each day. High-priority muscles should usually appear at least twice.</p>
+        </div>
+        <div class="day-grid">
+          ${draft.dayAssignments.map((day, index) => `
+            <article class="day-card">
+              <label class="field">
+                <span>Day label</span>
+                <input type="text" data-day-name="${index}" value="${escapeHtml(day.name)}" />
+              </label>
+              <div class="checkbox-list">
+                ${MUSCLE_GROUPS.map((muscle) => `
+                  <label class="checkbox-pill">
+                    <input type="checkbox" data-day-muscle="${index}" value="${muscle.id}" ${day.assignedMuscles.includes(muscle.id) ? "checked" : ""} />
+                    <span>${muscle.name}</span>
+                  </label>
+                `).join("")}
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        ${warnings.length ? `<div class="warning-box">${warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : `<p class="success-line">Split coverage looks workable for the selected priorities.</p>`}
+      </section>
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Exercise selection</h3>
+          <p>Pick at least one exercise for each muscle you assigned to a day.</p>
+        </div>
+        <div class="exercise-groups">
+          ${draft.dayAssignments.map((day, dayIndex) => `
+            <article class="exercise-card">
+              <h4>${escapeHtml(day.name)}</h4>
+              ${day.assignedMuscles.length ? day.assignedMuscles.map((muscleId) => renderExerciseSelector(dayIndex, muscleId, draft, exercises)).join("") : `<p class="muted">Add muscles to this day to unlock exercise choices.</p>`}
+            </article>
+          `).join("")}
+        </div>
+        <form class="custom-exercise-form" id="custom-exercise-form">
+          <h4>Add a custom exercise</h4>
+          <div class="grid-three">
+            <label class="field">
+              <span>Name</span>
+              <input required name="name" type="text" placeholder="Smith incline press" />
+            </label>
+            <label class="field">
+              <span>Primary muscle</span>
+              <select required name="primaryMuscle">
+                ${MUSCLE_GROUPS.map((muscle) => `<option value="${muscle.id}">${muscle.name}</option>`).join("")}
+              </select>
+            </label>
+            <label class="field">
+              <span>Equipment</span>
+              <input required name="equipment" type="text" placeholder="Smith machine" />
+            </label>
+          </div>
+          <button type="submit" class="secondary-button">Add custom exercise</button>
+        </form>
+      </section>
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Week 1 baseline</h3>
+          <p>Set your starting weight, target sets, and rep range for each selected exercise.</p>
+        </div>
+        <div class="baseline-list">
+          ${renderBaselineInputs(draft, exercises)}
+        </div>
+      </section>
+
+      <div class="action-row">
+        <button id="create-cycle" class="primary-button">Create mesocycle</button>
+        <button id="reset-builder" class="ghost-button">Reset builder</button>
+      </div>
+    </section>
+  `;
+
+  bindBuilderEvents();
+}
+
+function renderExerciseSelector(dayIndex, muscleId, draft, exercises) {
+  const key = `${dayIndex}:${muscleId}`;
+  const selected = draft.exerciseSelections[key] || [];
+  const muscle = MUSCLE_GROUPS.find((entry) => entry.id === muscleId);
+  const filtered = exercises.filter((exercise) => exercise.primaryMuscle === muscleId);
+
+  return `
+    <div class="exercise-selector">
+      <div class="exercise-selector-header">
+        <strong>${muscle.name}</strong>
+        <span>${selected.length} selected</span>
+      </div>
+      <div class="checkbox-list">
+        ${filtered.map((exercise) => `
+          <label class="checkbox-pill checkbox-pill--wide">
+            <input type="checkbox" data-exercise-select="${key}" value="${exercise.id}" ${selected.includes(exercise.id) ? "checked" : ""} />
+            <span>${exercise.name} · ${exercise.equipment}</span>
+          </label>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderBaselineInputs(draft, exercises) {
+  const selectedExerciseIds = Object.values(draft.exerciseSelections).flat();
+  if (!selectedExerciseIds.length) {
+    return `<p class="muted">Choose exercises above to unlock baseline setup.</p>`;
+  }
+
+  return selectedExerciseIds.map((exerciseId) => {
+    const exercise = exercises.find((entry) => entry.id === exerciseId);
+    const baseline = draft.baselineInputs[exerciseId] || { targetLoad: "", targetSets: 3, repRangeMin: 8, repRangeMax: 12 };
+    return `
+      <article class="baseline-card">
+        <h4>${exercise.name}</h4>
+        <div class="grid-three">
+          <label class="field compact">
+            <span>Load</span>
+            <input type="number" min="0" step="2.5" data-baseline-load="${exerciseId}" value="${baseline.targetLoad}" placeholder="kg" />
+          </label>
+          <label class="field compact">
+            <span>Sets</span>
+            <input type="number" min="2" max="8" step="1" data-baseline-sets="${exerciseId}" value="${baseline.targetSets}" />
+          </label>
+          <label class="field compact">
+            <span>Rep range</span>
+            <div class="inline-dual">
+              <input type="number" min="4" max="20" step="1" data-baseline-rep-min="${exerciseId}" value="${baseline.repRangeMin}" />
+              <input type="number" min="4" max="20" step="1" data-baseline-rep-max="${exerciseId}" value="${baseline.repRangeMax}" />
+            </div>
+          </label>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderDashboard() {
+  const { mesocycle, prescriptions, workoutLogs, recommendations } = state.appData;
+  const currentWeek = mesocycle.currentWeek;
+  const weekPrescription = prescriptions[currentWeek] || [];
+  const weekLogs = workoutLogs[currentWeek] || [];
+  const groupedByDay = mesocycle.trainingDaysDetail.map((day) => ({
+    day,
+    exercises: weekPrescription.filter((item) => item.trainingDayId === day.id)
+  }));
+  const weekRecommendations = recommendations[currentWeek] || [];
+  const isDeloadWeek = currentWeek > mesocycle.buildWeeks;
+
+  app.innerHTML = `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Active cycle</p>
+          <h2>${getWeekLabel(mesocycle, currentWeek)}</h2>
+        </div>
+        <div class="summary-chip">
+          <span>${mesocycle.trainingDays} days</span>
+          <strong>${mesocycle.buildWeeks} build weeks + deload</strong>
+        </div>
+      </div>
+
+      <section class="overview-strip">
+        ${MUSCLE_GROUPS.map((muscle) => `
+          <div class="overview-item">
+            <span>${muscle.name}</span>
+            <strong>${formatPriority(mesocycle.priorities[muscle.id])}</strong>
+          </div>
+        `).join("")}
+      </section>
+
+      ${mesocycle.warnings.length ? `<div class="warning-box">${mesocycle.warnings.map((warning) => `<p>${warning}</p>`).join("")}</div>` : ""}
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Weekly prescription</h3>
+          <p>Log each set with load, reps, and RIR. Recommendations unlock when the week is logged.</p>
+        </div>
+        <div class="exercise-groups">
+          ${groupedByDay.map(({ day, exercises }) => `
+            <article class="exercise-card">
+              <div class="section-title-row">
+                <h4>${escapeHtml(day.name)}</h4>
+                <span>${exercises.length} exercises</span>
+              </div>
+              ${exercises.map((exercise) => renderWorkoutLogger(exercise, weekLogs)).join("")}
+            </article>
+          `).join("")}
+        </div>
+      </section>
+
+      <div class="action-row">
+        <button id="save-week-logs" class="primary-button">Save week logs</button>
+        <button id="generate-review" class="secondary-button" ${isDeloadWeek ? "disabled" : ""}>Generate next-week review</button>
+      </div>
+
+      <section class="subsection">
+        <div class="section-title-row">
+          <h3>Weekly review</h3>
+          <p>Compare this week against next week’s plan, then confirm or edit it.</p>
+        </div>
+        ${isDeloadWeek ? `<p class="muted">Deload is the last week of the cycle. Finish the week, then start a fresh mesocycle.</p>` : weekRecommendations.length ? `
+          <div class="review-list">
+            ${weekRecommendations.map((recommendation) => {
+              const current = weekPrescription.find((item) => item.exerciseId === recommendation.exerciseId);
+              return `
+                <article class="review-card">
+                  <div class="section-title-row">
+                    <h4>${recommendation.exerciseName}</h4>
+                    <span>${current.targetSets} sets -> ${recommendation.suggestedSets} sets</span>
+                  </div>
+                  <p class="review-reason">${recommendation.reason}</p>
+                  <div class="grid-three">
+                    <label class="field compact">
+                      <span>Load</span>
+                      <input type="number" step="2.5" min="0" data-review-load="${recommendation.exerciseId}" value="${recommendation.suggestedLoad}" />
+                    </label>
+                    <label class="field compact">
+                      <span>Sets</span>
+                      <input type="number" step="1" min="2" max="8" data-review-sets="${recommendation.exerciseId}" value="${recommendation.suggestedSets}" />
+                    </label>
+                    <label class="field compact">
+                      <span>Rep range</span>
+                      <div class="inline-dual">
+                        <input type="number" min="4" max="20" step="1" data-review-rep-min="${recommendation.exerciseId}" value="${recommendation.suggestedRepRange[0]}" />
+                        <input type="number" min="4" max="20" step="1" data-review-rep-max="${recommendation.exerciseId}" value="${recommendation.suggestedRepRange[1]}" />
+                      </div>
+                    </label>
+                  </div>
+                </article>
+              `;
+            }).join("")}
+          </div>
+        ` : `<p class="muted">No review generated yet for this week.</p>`}
+      </section>
+
+      <div class="action-row">
+        <button id="confirm-next-week" class="primary-button" ${weekRecommendations.length && !isDeloadWeek ? "" : "disabled"}>Confirm next week</button>
+        <button id="restart-app" class="ghost-button">Start over</button>
+      </div>
+    </section>
+  `;
+
+  bindDashboardEvents();
+}
+
+function renderWorkoutLogger(exercise, savedLogs) {
+  const logs = savedLogs.filter((entry) => entry.exerciseId === exercise.exerciseId);
+  const rows = Array.from({ length: exercise.targetSets }, (_, index) => {
+    const saved = logs[index] || {};
+    return `
+      <div class="set-row">
+        <span class="set-index">Set ${index + 1}</span>
+        <input type="number" min="0" step="1" placeholder="Reps" data-log-reps="${exercise.exerciseId}:${index + 1}" value="${saved.reps || ""}" />
+        <input type="number" min="0" step="2.5" placeholder="Load" data-log-load="${exercise.exerciseId}:${index + 1}" value="${saved.load || exercise.targetLoad || ""}" />
+        <input type="number" min="0" max="5" step="0.5" placeholder="RIR" data-log-rir="${exercise.exerciseId}:${index + 1}" value="${saved.rir || ""}" />
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="logger-card">
+      <div class="section-title-row">
+        <div>
+          <strong>${exercise.exerciseName}</strong>
+          <p class="muted">${exercise.repRange[0]}-${exercise.repRange[1]} reps · ${exercise.targetLoad || 0} load target</p>
+        </div>
+        <span>${exercise.targetSets} sets</span>
+      </div>
+      <div class="set-grid">${rows}</div>
+    </div>
+  `;
+}
+
+function bindBuilderEvents() {
+  app.querySelector('[name="buildWeeks"]').addEventListener("change", (event) => {
+    state.draft.buildWeeks = Number(event.target.value);
+    persistAndRender();
+  });
+
+  app.querySelector('[name="trainingDays"]').addEventListener("change", (event) => {
+    const nextDays = Number(event.target.value);
+    const dayAssignments = Array.from({ length: nextDays }, (_, index) => {
+      return state.draft.dayAssignments[index] || { name: `Day ${index + 1}`, assignedMuscles: [] };
+    });
+    state.draft.trainingDays = nextDays;
+    state.draft.dayAssignments = dayAssignments;
+    persistAndRender();
+  });
+
+  app.querySelectorAll("[data-priority]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      state.draft.priorities[event.target.dataset.priority] = event.target.value;
+      persistAndRender();
+    });
+  });
+
+  app.querySelectorAll("[data-day-name]").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      state.draft.dayAssignments[Number(event.target.dataset.dayName)].name = event.target.value;
+      saveState(state);
+    });
+  });
+
+  app.querySelectorAll("[data-day-muscle]").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const dayIndex = Number(event.target.dataset.dayMuscle);
+      const assigned = new Set(state.draft.dayAssignments[dayIndex].assignedMuscles);
+      if (event.target.checked) {
+        assigned.add(event.target.value);
+      } else {
+        assigned.delete(event.target.value);
+      }
+      state.draft.dayAssignments[dayIndex].assignedMuscles = [...assigned];
+      persistAndRender();
+    });
+  });
+
+  app.querySelectorAll("[data-exercise-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const key = event.target.dataset.exerciseSelect;
+      const selected = new Set(state.draft.exerciseSelections[key] || []);
+      if (event.target.checked) {
+        selected.add(event.target.value);
+      } else {
+        selected.delete(event.target.value);
+      }
+      state.draft.exerciseSelections[key] = [...selected];
+      persistAndRender();
+    });
+  });
+
+  app.querySelector("#custom-exercise-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    state.customExercises.push({
+      id: createId("custom"),
+      name: String(formData.get("name")),
+      primaryMuscle: String(formData.get("primaryMuscle")),
+      secondaryMuscles: [],
+      equipment: String(formData.get("equipment")),
+      movementPattern: "Custom",
+      source: "custom"
+    });
+    event.target.reset();
+    persistAndRender();
+  });
+
+  app.querySelectorAll("[data-baseline-load]").forEach((input) => {
+    input.addEventListener("input", updateBaselineState);
+  });
+  app.querySelectorAll("[data-baseline-sets]").forEach((input) => {
+    input.addEventListener("input", updateBaselineState);
+  });
+  app.querySelectorAll("[data-baseline-rep-min]").forEach((input) => {
+    input.addEventListener("input", updateBaselineState);
+  });
+  app.querySelectorAll("[data-baseline-rep-max]").forEach((input) => {
+    input.addEventListener("input", updateBaselineState);
+  });
+
+  app.querySelector("#reset-builder").addEventListener("click", () => {
+    state = { customExercises: [], appData: null, draft: createInitialDraft() };
+    persistAndRender();
+  });
+
+  app.querySelector("#create-cycle").addEventListener("click", () => {
+    const exerciseSelections = flattenExerciseSelections(state.draft);
+    const missing = getMissingExerciseAssignments(state.draft);
+    const missingBaselines = exerciseSelections.some((selection) => {
+      const baseline = state.draft.baselineInputs[selection.exerciseId];
+      return !baseline || !baseline.targetLoad || !baseline.repRangeMin || !baseline.repRangeMax || !baseline.targetSets;
+    });
+
+    if (missing.length) {
+      window.alert(`Choose at least one exercise for: ${missing.join(", ")}`);
+      return;
+    }
+
+    if (missingBaselines) {
+      window.alert("Please enter baseline load, sets, and rep range for every selected exercise.");
+      return;
+    }
+
+    state.appData = createMesocycle({
+      buildWeeks: state.draft.buildWeeks,
+      trainingDays: state.draft.trainingDays,
+      priorities: state.draft.priorities,
+      dayAssignments: state.draft.dayAssignments,
+      exerciseSelections,
+      baselineInputs: normalizeBaselineInputs(state.draft.baselineInputs),
+      exerciseIndex: buildExerciseIndex()
+    });
+    persistAndRender();
+  });
+}
+
+function bindDashboardEvents() {
+  app.querySelector("#save-week-logs").addEventListener("click", () => {
+    const week = state.appData.mesocycle.currentWeek;
+    state.appData.workoutLogs[week] = collectWeekLogs();
+    persistAndRender();
+  });
+
+  app.querySelector("#generate-review").addEventListener("click", () => {
+    const currentWeek = state.appData.mesocycle.currentWeek;
+    const currentLogs = state.appData.workoutLogs[currentWeek] || collectWeekLogs();
+    if (!currentLogs.length) {
+      window.alert("Log at least one set before generating the next-week review.");
+      return;
+    }
+
+    state.appData.workoutLogs[currentWeek] = currentLogs;
+    const { recommendations, nextWeekPrescription } = generateNextWeekRecommendations({
+      mesocycle: state.appData.mesocycle,
+      currentWeek,
+      currentWeekPrescription: state.appData.prescriptions[currentWeek],
+      logsByExercise: buildLogsByExercise(currentLogs),
+      exerciseIndex: buildExerciseIndex()
+    });
+    state.appData.recommendations[currentWeek] = recommendations;
+    state.appData.pendingPrescription = nextWeekPrescription;
+    persistAndRender();
+  });
+
+  app.querySelector("#confirm-next-week").addEventListener("click", () => {
+    const currentWeek = state.appData.mesocycle.currentWeek;
+    const nextWeek = currentWeek + 1;
+    const nextWeekPrescription = (state.appData.pendingPrescription || []).map((item) => {
+      const load = Number(app.querySelector(`[data-review-load="${item.exerciseId}"]`)?.value || item.targetLoad);
+      const sets = Number(app.querySelector(`[data-review-sets="${item.exerciseId}"]`)?.value || item.targetSets);
+      const repMin = Number(app.querySelector(`[data-review-rep-min="${item.exerciseId}"]`)?.value || item.repRange[0]);
+      const repMax = Number(app.querySelector(`[data-review-rep-max="${item.exerciseId}"]`)?.value || item.repRange[1]);
+      return {
+        ...item,
+        targetLoad: load,
+        targetSets: sets,
+        repRange: [repMin, repMax]
+      };
+    });
+
+    state.appData.prescriptions[nextWeek] = nextWeekPrescription;
+    state.appData.mesocycle.currentWeek = nextWeek;
+    state.appData.pendingPrescription = null;
+    persistAndRender();
+  });
+
+  app.querySelector("#restart-app").addEventListener("click", () => {
+    clearState();
+    state = { customExercises: [], appData: null, draft: createInitialDraft() };
+    render();
+  });
+}
+
+function updateBaselineState(event) {
+  const [kind, exerciseId] = Object.entries(event.target.dataset)[0];
+  const baseline = state.draft.baselineInputs[exerciseId] || {
+    targetLoad: "",
+    targetSets: 3,
+    repRangeMin: 8,
+    repRangeMax: 12
+  };
+
+  if (kind === "baselineLoad") {
+    baseline.targetLoad = event.target.value;
+  }
+  if (kind === "baselineSets") {
+    baseline.targetSets = Number(event.target.value);
+  }
+  if (kind === "baselineRepMin") {
+    baseline.repRangeMin = Number(event.target.value);
+  }
+  if (kind === "baselineRepMax") {
+    baseline.repRangeMax = Number(event.target.value);
+  }
+
+  state.draft.baselineInputs[exerciseId] = baseline;
+  saveState(state);
+}
+
+function flattenExerciseSelections(draft) {
+  const selections = [];
+  draft.dayAssignments.forEach((day, dayIndex) => {
+    day.assignedMuscles.forEach((muscleId) => {
+      const key = `${dayIndex}:${muscleId}`;
+      (draft.exerciseSelections[key] || []).forEach((exerciseId) => {
+        selections.push({
+          trainingDayIndex: dayIndex,
+          muscleGroupId: muscleId,
+          exerciseId
+        });
+      });
+    });
+  });
+  return selections;
+}
+
+function getMissingExerciseAssignments(draft) {
+  const missing = [];
+
+  draft.dayAssignments.forEach((day) => {
+    day.assignedMuscles.forEach((muscleId) => {
+      const key = `${draft.dayAssignments.indexOf(day)}:${muscleId}`;
+      if (!(draft.exerciseSelections[key] || []).length) {
+        const muscleName = MUSCLE_GROUPS.find((muscle) => muscle.id === muscleId).name;
+        missing.push(`${day.name} / ${muscleName}`);
+      }
+    });
+  });
+
+  return missing;
+}
+
+function normalizeBaselineInputs(inputs) {
+  return Object.fromEntries(
+    Object.entries(inputs).map(([exerciseId, value]) => [
+      exerciseId,
+      {
+        targetLoad: Number(value.targetLoad),
+        targetSets: Number(value.targetSets),
+        repRange: [Number(value.repRangeMin), Number(value.repRangeMax)]
+      }
+    ])
+  );
+}
+
+function collectWeekLogs() {
+  const week = state.appData.mesocycle.currentWeek;
+  const prescription = state.appData.prescriptions[week];
+  const entries = [];
+
+  prescription.forEach((item) => {
+    Array.from({ length: item.targetSets }, (_, index) => index + 1).forEach((setNumber) => {
+      const reps = app.querySelector(`[data-log-reps="${item.exerciseId}:${setNumber}"]`)?.value;
+      const load = app.querySelector(`[data-log-load="${item.exerciseId}:${setNumber}"]`)?.value;
+      const rir = app.querySelector(`[data-log-rir="${item.exerciseId}:${setNumber}"]`)?.value;
+
+      if (reps !== "" && load !== "" && rir !== "") {
+        entries.push({
+          id: createId("set-log"),
+          workoutLogId: `${week}-${item.trainingDayId}`,
+          trainingDayId: item.trainingDayId,
+          exerciseId: item.exerciseId,
+          setNumber,
+          reps: Number(reps),
+          load: Number(load),
+          rir: Number(rir)
+        });
+      }
+    });
+  });
+
+  return entries;
+}
+
+function buildExerciseIndex() {
+  return Object.fromEntries([...EXERCISE_LIBRARY, ...state.customExercises].map((exercise) => [exercise.id, exercise]));
+}
+
+function persistAndRender() {
+  saveState(state);
+  render();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
