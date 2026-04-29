@@ -52,10 +52,11 @@ let state = loadState() || {
 state.draft.builderStep ??= 0;
 state.draft.priorities ??= {};
 state.draft.prioritySelections ??= {
-  HIGH: "",
-  MEDIUM: "",
-  MAINTAIN: ""
+  HIGH: [],
+  MEDIUM: [],
+  MAINTAIN: []
 };
+state.draft.priorityModal ??= null;
 
 render();
 
@@ -71,10 +72,11 @@ function createInitialDraft() {
     exerciseSelections: {},
     baselineInputs: {},
     prioritySelections: {
-      HIGH: "",
-      MEDIUM: "",
-      MAINTAIN: ""
+      HIGH: [],
+      MEDIUM: [],
+      MAINTAIN: []
     },
+    priorityModal: null,
     builderStep: 0
   };
 }
@@ -223,6 +225,7 @@ function renderBuilderStepContent(draft, exercises, warnings) {
         <div class="priority-buckets">
           ${PRIORITY_LEVELS.map((level) => renderPriorityBucket(level, draft)).join("")}
         </div>
+        ${renderPriorityModal(draft)}
       `;
     case 2:
       return `
@@ -301,9 +304,6 @@ function renderBuilderStepContent(draft, exercises, warnings) {
 
 function renderPriorityBucket(level, draft) {
   const selectedMuscles = getPriorityMuscles(level, draft.priorities);
-  const availableMuscles = getAvailablePriorityMuscles(level, draft.priorities);
-  const selectedOption =
-    availableMuscles.find((muscle) => muscle.id === draft.prioritySelections[level])?.id || "";
 
   return `
     <article class="priority-bucket">
@@ -315,14 +315,7 @@ function renderPriorityBucket(level, draft) {
         <span>${selectedMuscles.length} selected</span>
       </div>
       <div class="bucket-picker">
-        <label class="field compact">
-          <span>Add muscle</span>
-          <select data-priority-select="${level}">
-            <option value="">Choose a muscle</option>
-            ${availableMuscles.map((muscle) => `<option value="${muscle.id}" ${selectedOption === muscle.id ? "selected" : ""}>${muscle.name}</option>`).join("")}
-          </select>
-        </label>
-        <button type="button" class="secondary-button" data-priority-add="${level}" ${selectedOption ? "" : "disabled"}>Add</button>
+        <button type="button" class="secondary-button" data-priority-open="${level}">Add muscle</button>
       </div>
       <div class="selected-muscles">
         ${selectedMuscles.length ? selectedMuscles.map((muscle) => `
@@ -333,6 +326,42 @@ function renderPriorityBucket(level, draft) {
         `).join("") : `<p class="muted">No muscles assigned here yet.</p>`}
       </div>
     </article>
+  `;
+}
+
+function renderPriorityModal(draft) {
+  if (!draft.priorityModal) {
+    return "";
+  }
+
+  const level = draft.priorityModal;
+  const availableMuscles = getAvailablePriorityMuscles(level, draft.priorities);
+  const selectedSet = new Set(draft.prioritySelections[level] || []);
+
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card">
+        <div class="section-title-row">
+          <div>
+            <h3>Add muscles to ${formatPriority(level)}</h3>
+            <p>Select as many muscles as you want, then add them together.</p>
+          </div>
+          <button type="button" class="ghost-button" data-priority-close>Close</button>
+        </div>
+        <div class="modal-muscle-list">
+          ${availableMuscles.length ? availableMuscles.map((muscle) => `
+            <label class="checkbox-pill checkbox-pill--wide modal-muscle-option">
+              <input type="checkbox" data-priority-modal-muscle="${level}" value="${muscle.id}" ${selectedSet.has(muscle.id) ? "checked" : ""} />
+              <span>${muscle.name}</span>
+            </label>
+          `).join("") : `<p class="muted">No more muscles available for this category.</p>`}
+        </div>
+        <div class="builder-nav modal-actions">
+          <button type="button" class="ghost-button" data-priority-clear="${level}">Clear</button>
+          <button type="button" class="primary-button" data-priority-confirm="${level}" ${selectedSet.size ? "" : "disabled"}>Add selected</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -552,16 +581,53 @@ function bindBuilderEvents() {
     });
   });
 
-  app.querySelectorAll("[data-priority-add]").forEach((button) => {
+  app.querySelectorAll("[data-priority-open]").forEach((button) => {
     button.addEventListener("click", (event) => {
-      const level = event.currentTarget.dataset.priorityAdd;
-      const muscleId = state.draft.prioritySelections[level];
-      if (!muscleId) {
-        return;
-      }
+      const level = event.currentTarget.dataset.priorityOpen;
+      state.draft.priorityModal = level;
+      state.draft.prioritySelections[level] = [];
+      persistAndRender();
+    });
+  });
 
-      state.draft.priorities[muscleId] = level;
-      state.draft.prioritySelections[level] = "";
+  app.querySelectorAll("[data-priority-modal-muscle]").forEach((checkbox) => {
+    checkbox.addEventListener("change", (event) => {
+      const level = event.target.dataset.priorityModalMuscle;
+      const selected = new Set(state.draft.prioritySelections[level] || []);
+      if (event.target.checked) {
+        selected.add(event.target.value);
+      } else {
+        selected.delete(event.target.value);
+      }
+      state.draft.prioritySelections[level] = [...selected];
+      saveState(state);
+      render();
+    });
+  });
+
+  app.querySelector("[data-priority-close]")?.addEventListener("click", () => {
+    state.draft.priorityModal = null;
+    persistAndRender();
+  });
+
+  app.querySelectorAll("[data-priority-clear]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const level = event.currentTarget.dataset.priorityClear;
+      state.draft.prioritySelections[level] = [];
+      saveState(state);
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-priority-confirm]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const level = event.currentTarget.dataset.priorityConfirm;
+      const muscleIds = state.draft.prioritySelections[level] || [];
+      muscleIds.forEach((muscleId) => {
+        state.draft.priorities[muscleId] = level;
+      });
+      state.draft.prioritySelections[level] = [];
+      state.draft.priorityModal = null;
       persistAndRender();
     });
   });
